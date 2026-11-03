@@ -1,38 +1,29 @@
 ---
-name: google
-description: How to read and search a person's Gmail, draft and send mail, and list, create, change and delete their Google Calendar events on Pointman, with any number of Google accounts, through the google extension's commands. Use it when a task touches their mail, calendar or availability.
+name: gcal
+description: How to list a person's Google Calendar events and busy times, and create, change and delete their events on Pointman, with any number of Google accounts, through the gcal extension's commands. Use it when a task touches their calendar or availability.
 ---
 
-# Gmail and Google Calendar
+# Google Calendar
 
-For tasks on the person's mail or calendar: finding a message, answering one, what's on this week, booking or moving
-a meeting, when people are free. Skip it otherwise.
+For tasks on the person's calendar: what's on this week, booking or moving a meeting, when people are free. Skip it
+otherwise. Mail is the gmail extension's.
 
-**The commands,** on any machine with the extension: `create_job` (or `/google <verb>` in a thread).
+**The commands,** on any machine with the extension: `create_job` (or `/gcal <verb>` in a thread).
 
 | For | Command |
 |---|---|
-| Which accounts are signed in, their addresses, whether they work | `google.accounts {}` |
-| Find mail (Gmail's search: `from:bob newer_than:7d`, `is:unread in:inbox`) | `google.mail_search {query, account?, limit?}` |
-| Read one message: headers, its text in `body`, attachments' names | `google.mail_read {id, account?}` |
-| A draft, nothing sent (`reply_to` a message's id: in its thread, to its sender, `Re:` its subject) | `google.mail_draft {to, cc?, subject, body, reply_to?, account?}` |
-| Send a draft, or a new message, at once | `google.mail_send {draft \| to, cc?, subject, body, account?}` |
-| The calendars an account has | `google.calendars {account?}` |
-| Events between two times, soonest first | `google.events {from, to, calendar?, query?, account?}` |
-| A new event (Meet link with `meet`, invitations with `notify`) | `google.event_create {title, start, end, time_zone?, description?, location?, attendees?, meet?, notify?, calendar?, account?, confirm}` |
-| Change an event: only the fields given (`attendees` replaces the whole list) | `google.event_update {id, title?, start?, end?, …, attendees?, notify?, account?, confirm}` |
-| Delete an event | `google.event_delete {id, notify?, account?, confirm}` |
-| When people are busy | `google.freebusy {from, to, emails?, account?}` |
+| Which accounts are signed in, their addresses, whether they work | `gcal.accounts {}` |
+| The calendars an account has | `gcal.calendars {account?}` |
+| Events between two times, soonest first | `gcal.events {from, to, calendar?, query?, account?}` |
+| A new event (Meet link with `meet`, invitations with `notify`) | `gcal.create {title, start, end, time_zone?, description?, location?, attendees?, meet?, notify?, calendar?, account?, confirm}` |
+| Change an event: only the fields given (`attendees` replaces the whole list) | `gcal.update {id, title?, start?, end?, …, attendees?, notify?, account?, confirm}` |
+| Delete an event | `gcal.delete {id, notify?, account?, confirm}` |
+| When people are busy | `gcal.freebusy {from, to, emails?, account?}` |
 
-**Accounts.** Each is a label (`work`, `personal`): the vault's `google.<label>`. Name one with `account`. Without it, a
+**Accounts.** Each is a label (`work`, `personal`): the vault's `gcal.<label>`. Name one with `account`. Without it, a
 read uses the `account` setting's, else every account, and says which each result came from; a write uses the setting's
-or the only one, and with several it stops and lists them. Then ask the person which, never guess. `google.accounts`
+or the only one, and with several it stops and lists them. Then ask the person which, never guess. `gcal.accounts`
 says whose each one is.
-
-**Sending is real.** `google.mail_send` sends as soon as it's called, and a sent message can't be taken back. Send
-only what the task or its workflow asked for: to those people, from that account, with that text. Where the workflow
-asks the person first (an `ask` step), send after their yes, exactly what they said yes to. Not asked to send it?
-Draft it (`google.mail_draft`) and say what you drafted.
 
 **Ask first for calendar writes.** Creating, changing or deleting an event is the person's call. Post exactly what will
 happen as a decision: its title, times, calendar, attendees, and whether they're emailed (`notify`). Pass
@@ -42,18 +33,17 @@ happen as a decision: its title, times, calendar, attendees, and whether they're
 is off. Ask it with the event, naming who gets it, and set it only when the person says to tell them. It's off unless
 given, and the event still needs `confirm`.
 
-**Adding or removing someone:** `event_update`'s `attendees` replaces the whole list, so whoever you leave out is taken
-off the event (and with `notify`, emailed that they're off it). Read the event first (`google.events` gives its
+**Adding or removing someone:** `gcal.update`'s `attendees` replaces the whole list, so whoever you leave out is taken
+off the event (and with `notify`, emailed that they're off it). Read the event first (`gcal.events` gives its
 attendees), then pass everyone who should stay, plus the change.
 
-**Mail is private.** A message's words come back in `body`, and a search's in `snippet`: read them to do the task, then
-tell the person what's there in your own words. Post a message's text, or forward it, only when they ask. Run mail
-commands without `thread`, so their results come back to you rather than into a thread.
+**Calendars are private.** Events' descriptions, places and attendees are the person's: use them to do the task, and
+post them only when asked.
 
 **Times** are RFC 3339 with an offset (`2026-11-05T10:00:00+08:00`), or a local time with `time_zone`
 (`2026-11-05T10:00`, `Asia/Singapore`), or a day for an all-day event (`2026-11-05`; its `end` is the day after its last).
 A range's day starts at midnight UTC: give times with the person's offset for "today" or "this week".
 
-- **Not signed in?** Ask the person to run `/google client` in the app once (their Google Cloud OAuth client), then
-  `/google add <label>` for each account. Never ask for, paste or post a token, a code or the client's secret.
-- An error that says a sign-in no longer works: ask them to run `/google add <label>` again for that account.
+- **Not signed in?** Ask the person to run `/gcal client` in the app once (their Google Cloud OAuth client), then
+  `/gcal add <label>` for each account. Never ask for, paste or post a token, a code or the client's secret.
+- An error that says a sign-in no longer works: ask them to run `/gcal add <label>` again for that account.

@@ -1,5 +1,5 @@
-//! Google's HTTP APIs: OAuth (a refresh token into an access token), Gmail's and Calendar's, with a token that's made
-//! again when Google says it ran out. Errors say what Google said, never a token or a code.
+//! Google's HTTP APIs: OAuth (a refresh token into an access token) and Calendar's, with a token that's made again
+//! when Google says it ran out. Errors say what Google said, never a token or a code.
 
 use std::io::Read;
 use std::time::Duration;
@@ -12,8 +12,6 @@ use serde_json::Value;
 /// own environment on, so only a test can).
 #[derive(Debug, Clone)]
 pub struct Endpoints {
-    /// Gmail: `{gmail}/gmail/v1/…`.
-    pub gmail: String,
     /// Calendar: `{calendar}/calendar/v3/…`.
     pub calendar: String,
     /// OAuth's token endpoint's host: `{oauth}/token`.
@@ -33,7 +31,6 @@ impl Endpoints {
                 .to_string()
         };
         Endpoints {
-            gmail: get("GOOGLE_GMAIL_BASE", "https://gmail.googleapis.com"),
             calendar: get("GOOGLE_CALENDAR_BASE", "https://www.googleapis.com"),
             oauth: get("GOOGLE_OAUTH_BASE", "https://oauth2.googleapis.com"),
             auth: get("GOOGLE_AUTH_URL", "https://accounts.google.com/o/oauth2/v2/auth"),
@@ -41,7 +38,7 @@ impl Endpoints {
     }
 }
 
-/// The Google OAuth client the sign-ins go through (the vault's `google.client`): a Web application client.
+/// The Google OAuth client the sign-ins go through (the vault's `gcal.client`): a Web application client.
 #[derive(Clone)]
 pub struct OAuthClient {
     pub id: String,
@@ -69,7 +66,7 @@ pub fn agent() -> ureq::Agent {
         .timeout_connect(Duration::from_secs(30))
         .timeout_read(Duration::from_secs(120))
         .timeout_write(Duration::from_secs(120))
-        .user_agent(concat!("pointman-google/", env!("CARGO_PKG_VERSION")))
+        .user_agent(concat!("pointman-gcal/", env!("CARGO_PKG_VERSION")))
         .build()
 }
 
@@ -91,12 +88,11 @@ impl std::fmt::Display for Failure {
                     "insufficientPermissions" | "ACCESS_TOKEN_SCOPE_INSUFFICIENT" | "PERMISSION_DENIED"
                         if message.contains("scope") =>
                     {
-                        " (the sign-in didn't allow this: sign the account in again with /google add and allow Gmail \
-                         and Calendar)"
+                        " (the sign-in didn't allow this: sign the account in again with /gcal add and allow Calendar)"
                     }
                     "accessNotConfigured" | "SERVICE_DISABLED" => {
-                        " (the API is off in the OAuth client's Google Cloud project: turn on the Gmail API and the \
-                         Google Calendar API there)"
+                        " (the API is off in the OAuth client's Google Cloud project: turn on the Google Calendar API \
+                         there)"
                     }
                     "rateLimitExceeded" | "userRateLimitExceeded" | "RESOURCE_EXHAUSTED" => {
                         " (too many calls for now: try again in a minute)"
@@ -212,18 +208,18 @@ pub fn access_token(
         ("refresh_token", refresh),
         ("grant_type", "refresh_token"),
     ]));
-    let label = item.trim_start_matches("google.");
+    let label = item.trim_start_matches("gcal.");
     let v = match got {
         Ok(v) => v,
         Err(Failure::Said { reason, .. }) if reason == "invalid_grant" => {
             return Err(anyhow!(
                 "Google no longer takes {item}'s sign-in (invalid_grant: revoked, unused for 6 months, or 7 days old \
-                 while the OAuth app is in testing): sign it in again with /google add {label}"
+                 while the OAuth app is in testing): sign it in again with /gcal add {label}"
             ))
         }
         Err(Failure::Said { reason, .. }) if reason == "invalid_client" || reason == "unauthorized_client" => {
             return Err(anyhow!(
-                "Google refused the OAuth client ({reason}): check google.client is the Web application client \
+                "Google refused the OAuth client ({reason}): check gcal.client is the Web application client \
                  {item} was signed in with"
             ))
         }
@@ -247,7 +243,7 @@ pub fn segment(s: &str) -> String {
     out
 }
 
-/// Calls to Gmail and Calendar with a token from `token` (true: make a new one, the last was refused), tried once
+/// Calls to Calendar with a token from `token` (true: make a new one, the last was refused), tried once
 /// more with a new token when Google says 401.
 pub struct Api<'a> {
     pub agent: &'a ureq::Agent,
@@ -256,11 +252,6 @@ pub struct Api<'a> {
 }
 
 impl Api<'_> {
-    /// `users/me/messages` is Gmail's `…/gmail/v1/users/me/messages`.
-    pub fn gmail(&self, path: &str) -> String {
-        format!("{}/gmail/v1/{path}", self.ends.gmail)
-    }
-
     /// `users/me/calendarList` is Calendar's `…/calendar/v3/users/me/calendarList`.
     pub fn calendar(&self, path: &str) -> String {
         format!("{}/calendar/v3/{path}", self.ends.calendar)
@@ -330,9 +321,9 @@ mod tests {
     fn googles_errors_say_their_reason() {
         let api = r#"{"error": {"code": 403, "message": "Request had insufficient authentication scopes.", "status": "PERMISSION_DENIED", "errors": [{"reason": "insufficientPermissions"}]}}"#;
         let e = said(403, api).to_string();
-        assert!(e.contains("insufficientPermissions") && e.contains("/google add"), "{e}");
-        let off = r#"{"error": {"code": 403, "message": "Gmail API has not been used in project 1 before or it is disabled.", "errors": [{"reason": "accessNotConfigured"}]}}"#;
-        assert!(said(403, off).to_string().contains("turn on the Gmail API"));
+        assert!(e.contains("insufficientPermissions") && e.contains("/gcal add"), "{e}");
+        let off = r#"{"error": {"code": 403, "message": "Google Calendar API has not been used in project 1 before or it is disabled.", "errors": [{"reason": "accessNotConfigured"}]}}"#;
+        assert!(said(403, off).to_string().contains("turn on the Google Calendar API"));
         let oauth = r#"{"error": "invalid_grant", "error_description": "Token has been expired or revoked."}"#;
         assert!(matches!(said(400, oauth), Failure::Said { reason, .. } if reason == "invalid_grant"));
     }

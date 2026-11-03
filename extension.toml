@@ -1,24 +1,23 @@
-# Google on Pointman: Gmail and Google Calendar for every agent on the machines it's installed on, with any number of
-# Google accounts. Each account is signed in from the apps (Google's authorization-code flow with PKCE, coming back
-# through core's /oauth/callback: nothing to paste), and its refresh token is kept in the vault as google.<label>, so
-# every node uses the same sign-ins. Reads go to every account unless a call names one. Mail is sent when mail_send is
-# called (the yes before it is the workflow's or the task's); changing a calendar needs confirm=true, given once the
-# person has said yes.
+# Google Calendar on Pointman: every agent on the machines it's installed on reads and changes calendars, with any number
+# of Google accounts. Each account is signed in from the apps (Google's authorization-code flow with PKCE, coming back
+# through core's /oauth/callback: nothing to paste), and its refresh token is kept in the vault as gcal.<label>, so
+# every node uses the same sign-ins. Reads go to every account unless a call names one. Making, changing or deleting
+# an event needs confirm=true, given once the person has said yes. Mail is gmail's, a separate extension.
 #
-# The commands' params and [settings] are written from proto/google/v1/google.proto (`<Verb>Params`, `Settings`) by
+# The commands' params and [settings] are written from proto/gcal/v1/gcal.proto (`<Verb>Params`, `Settings`) by
 # the SDK's `pointman-extension manifest write`: change the proto, then write them again.
 
 [extension]
-id = "google"
-name = "Google"
+id = "gcal"
+name = "Google Calendar"
 version = "0.1.0"
 publisher = "aurelio"
-summary = "Gmail and Google Calendar for every agent: search and read mail, draft and send it, list and change events, with any number of Google accounts."
+summary = "Google Calendar for every agent: list calendars and events, find busy times, and make, change and delete events, with any number of Google accounts."
 node = ">=0.4.0"
 platforms = ["macos-arm64", "macos-x86_64", "linux-x86_64", "linux-arm64"]
 
 [run]
-command = ["bin/google"]
+command = ["bin/gcal"]
 runtime = "binary"
 
 [behavior]
@@ -26,17 +25,17 @@ skill = "SKILL.md"
 clients = ["claude", "codex", "gemini"]
 
 [permissions]
-network = true                   # Gmail's and Calendar's APIs, and Google's OAuth endpoints
-secrets = ["google.*"]           # google.client (the OAuth client) and google.<label> (each account's sign-in)
+network = true                   # Calendar's API, and Google's OAuth endpoints
+secrets = ["gcal.*"]             # gcal.client (the OAuth client) and gcal.<label> (each account's sign-in)
 
-# Your own Google OAuth client, once: a "Web application" client in a Google Cloud project with the Gmail API and the
-# Google Calendar API turned on, whose authorised redirect URI is your Pointman's /oauth/callback.
+# Your own Google OAuth client, once: a "Web application" client in a Google Cloud project with the Google Calendar API
+# turned on, whose authorised redirect URI is your Pointman's /oauth/callback. gmail can use the same client.
 [[credentials]]
 id = "client"
 title = "Your Google OAuth client"
-help = "In Google Cloud console: APIs & Services › Credentials › Create OAuth client ID › Web application, with redirect URI https://<your Pointman>/oauth/callback. Turn on the Gmail and Calendar APIs. Paste its client ID, a space, then its secret."
+help = "In Google Cloud console: APIs & Services › Credentials › Create OAuth client ID › Web application, with redirect URI https://<your Pointman>/oauth/callback. Turn on the Calendar API. Paste its client ID, a space, then its secret."
 needed = 1
-item = "google.client"
+item = "gcal.client"
 value = '[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com[\s:]+[A-Za-z0-9_-]{16,128}'
 placeholder = "123-abc.apps.googleusercontent.com GOCSPX-…"
 
@@ -44,13 +43,13 @@ placeholder = "123-abc.apps.googleusercontent.com GOCSPX-…"
 [[credentials]]
 id = "account"
 title = "Google account"
-help = "Sign in with the Google account and allow Gmail and Calendar. Give each account its own label (work, personal)."
-item = "google.{label}"
+help = "Sign in with the Google account and allow Calendar. Give each account its own label (work, personal)."
+item = "gcal.{label}"
 value = '1//[A-Za-z0-9_-]{20,512}'
 placeholder = "1//0g…"
 sign_in = true
 
-# From Settings in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From Settings in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [settings]
 type = "object"
 description = "The extension's settings, per machine."
@@ -58,183 +57,32 @@ additionalProperties = false
 
 [settings.properties.account]
 type = "string"
-description = "The label of the Google account a call uses when it names none (work, for the vault's google.work). Empty: the only one signed in; with several, reads use them all and writes stop and list them."
+description = "The label of the Google account a call uses when it names none (work, for the vault's gcal.work). Empty: the only one signed in; with several, reads use them all and writes stop and list them."
 maxLength = 32
 pattern = "^([a-z0-9][a-z0-9._-]*)?$"
 
 [[commands]]
-kind = "google.accounts"
+kind = "gcal.accounts"
 title = "Google accounts and whether they work"
 slash = "accounts"
 summary = "Each Google account signed in: its label, its address, and whether its sign-in still works"
 
-# From AccountsParams in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From AccountsParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.accounts: each Google account signed in, its address, and whether its sign-in still works."
+description = "gcal.accounts: each Google account signed in, its address, and whether its sign-in still works."
 additionalProperties = false
 
 [[commands]]
-kind = "google.mail_search"
-title = "Search mail (query, account?, limit?)"
-slash = "mail-search"
-summary = "Messages that match a Gmail search, newest first: who, subject, when; every account unless one is named"
-
-# From MailSearchParams in proto/google/v1/google.proto: `pointman-extension manifest write`
-[commands.params]
-type = "object"
-description = "google.mail_search: messages that match a Gmail search, newest first."
-required = ["query"]
-additionalProperties = false
-
-[commands.params.properties.query]
-type = "string"
-description = "Gmail's search, as its search box takes it: from:bob newer_than:7d, is:unread in:inbox, subject:invoice."
-minLength = 1
-maxLength = 1000
-
-[commands.params.properties.account]
-type = "string"
-description = "The label of the Google account to search (work, for the vault's google.work). Empty: the account setting's, else every account signed in."
-maxLength = 32
-pattern = "^([a-z0-9][a-z0-9._-]*)?$"
-
-[commands.params.properties.limit]
-type = "integer"
-description = "How many messages, newest first, from each account (default 10)."
-default = 10
-minimum = 1
-maximum = 50
-
-[[commands]]
-kind = "google.mail_read"
-title = "Read a message (id, account?)"
-slash = "mail-read"
-summary = "One message: its headers, its text and its attachments' names. Private: say what's there"
-
-# From MailReadParams in proto/google/v1/google.proto: `pointman-extension manifest write`
-[commands.params]
-type = "object"
-description = "google.mail_read: one message, with its text and the names of its attachments."
-required = ["id"]
-additionalProperties = false
-
-[commands.params.properties.id]
-type = "string"
-description = "The message's id, from google.mail_search."
-minLength = 1
-maxLength = 128
-pattern = "^[A-Za-z0-9_-]+$"
-
-[commands.params.properties.account]
-type = "string"
-description = "The label of the Google account it's in. Empty: the account setting's, else each account signed in until one has it."
-maxLength = 32
-pattern = "^([a-z0-9][a-z0-9._-]*)?$"
-
-[[commands]]
-kind = "google.mail_draft"
-title = "Draft a message (to, subject, body, reply_to?)"
-slash = "draft"
-summary = "A draft in Gmail, nothing sent; a reply goes in the message's thread"
-
-# From MailDraftParams in proto/google/v1/google.proto: `pointman-extension manifest write`
-[commands.params]
-type = "object"
-description = "google.mail_draft: a draft in Gmail, nothing sent. A reply joins the message's thread."
-required = ["body"]
-additionalProperties = false
-
-[commands.params.properties.to]
-type = "array"
-items = { type = "string", minLength = 3, maxLength = 320 }
-description = "Who it's to: addresses, or Name <address>. Left out for a reply: the message's sender."
-maxItems = 100
-
-[commands.params.properties.cc]
-type = "array"
-items = { type = "string", minLength = 3, maxLength = 320 }
-description = "Who's copied."
-maxItems = 100
-
-[commands.params.properties.subject]
-type = "string"
-description = "Its subject. Left out for a reply: Re: and the message's."
-maxLength = 998
-
-[commands.params.properties.body]
-type = "string"
-description = "Its text, as plain text."
-minLength = 1
-maxLength = 100000
-
-[commands.params.properties.reply_to]
-type = "string"
-description = "The id of a message this answers (google.mail_search's): the draft goes in its thread."
-maxLength = 128
-pattern = "^([A-Za-z0-9_-]+)?$"
-
-[commands.params.properties.account]
-type = "string"
-description = "The label of the Google account it's from. Empty: the account setting's, or the only one signed in."
-maxLength = 32
-pattern = "^([a-z0-9][a-z0-9._-]*)?$"
-
-[[commands]]
-kind = "google.mail_send"
-title = "Send mail (draft, or to/subject/body)"
-slash = "send"
-summary = "Send a draft or a new message, at once: only what the task or workflow asked for"
-
-# From MailSendParams in proto/google/v1/google.proto: `pointman-extension manifest write`
-[commands.params]
-type = "object"
-description = "google.mail_send: send a draft, or a new message. It goes at once: send only what the task or workflow asked for."
-additionalProperties = false
-
-[commands.params.properties.draft]
-type = "string"
-description = "A draft's id (google.mail_draft's) to send as it is. Or leave it out and give to, subject and body."
-maxLength = 128
-pattern = "^([A-Za-z0-9_-]+)?$"
-
-[commands.params.properties.to]
-type = "array"
-items = { type = "string", minLength = 3, maxLength = 320 }
-description = "Who it's to: addresses, or Name <address>."
-maxItems = 100
-
-[commands.params.properties.cc]
-type = "array"
-items = { type = "string", minLength = 3, maxLength = 320 }
-description = "Who's copied."
-maxItems = 100
-
-[commands.params.properties.subject]
-type = "string"
-maxLength = 998
-
-[commands.params.properties.body]
-type = "string"
-description = "Its text, as plain text."
-maxLength = 100000
-
-[commands.params.properties.account]
-type = "string"
-description = "The label of the Google account it's from. Empty: the account setting's, or the only one signed in."
-maxLength = 32
-pattern = "^([a-z0-9][a-z0-9._-]*)?$"
-
-[[commands]]
-kind = "google.calendars"
+kind = "gcal.calendars"
 title = "List calendars (account?)"
 slash = "calendars"
 summary = "The calendars each account has: id, name, its role, its time zone"
 
-# From CalendarsParams in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From CalendarsParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.calendars: the calendars each account has."
+description = "gcal.calendars: the calendars each account has."
 additionalProperties = false
 
 [commands.params.properties.account]
@@ -244,15 +92,15 @@ maxLength = 32
 pattern = "^([a-z0-9][a-z0-9._-]*)?$"
 
 [[commands]]
-kind = "google.events"
+kind = "gcal.events"
 title = "Events between two times (from, to, calendar?)"
 slash = "events"
 summary = "A calendar's events between two times, soonest first; every account unless one is named"
 
-# From EventsParams in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From EventsParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.events: a calendar's events between two times, soonest first, each repeat on its own."
+description = "gcal.events: a calendar's events between two times, soonest first, each repeat on its own."
 required = ["from", "to"]
 additionalProperties = false
 
@@ -270,7 +118,7 @@ maxLength = 40
 
 [commands.params.properties.calendar]
 type = "string"
-description = "The calendar's id, from google.calendars (default primary, the account's own)."
+description = "The calendar's id, from gcal.calendars (default primary, the account's own)."
 default = "primary"
 maxLength = 256
 
@@ -286,15 +134,15 @@ maxLength = 32
 pattern = "^([a-z0-9][a-z0-9._-]*)?$"
 
 [[commands]]
-kind = "google.event_create"
+kind = "gcal.create"
 title = "Create an event (title, start, end, …, confirm)"
-slash = "event-create"
+slash = "create"
 summary = "A new calendar event, with attendees and a Meet link if asked; needs confirm=true"
 
-# From EventCreateParams in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From CreateParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.event_create: a new event. Only once the person has said yes."
+description = "gcal.create: a new event. Only once the person has said yes."
 required = ["title", "start", "end"]
 additionalProperties = false
 
@@ -359,21 +207,21 @@ type = "boolean"
 description = "True once the person has said yes to this event. Without it, nothing is made."
 
 [[commands]]
-kind = "google.event_update"
+kind = "gcal.update"
 title = "Change an event (id, …, confirm)"
-slash = "event-update"
+slash = "update"
 summary = "Change an event's title, times, place, notes or attendees; needs confirm=true"
 
-# From EventUpdateParams in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From UpdateParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.event_update: change an event. Only the fields given change. Only once the person has said yes."
+description = "gcal.update: change an event. Only the fields given change. Only once the person has said yes."
 required = ["id"]
 additionalProperties = false
 
 [commands.params.properties.id]
 type = "string"
-description = "The event's id, from google.events."
+description = "The event's id, from gcal.events."
 minLength = 1
 maxLength = 1024
 
@@ -384,13 +232,13 @@ maxLength = 1024
 
 [commands.params.properties.start]
 type = "string"
-description = "A new start, as google.event_create's."
+description = "A new start, as gcal.create's."
 minLength = 10
 maxLength = 40
 
 [commands.params.properties.end]
 type = "string"
-description = "A new end, as google.event_create's."
+description = "A new end, as gcal.create's."
 minLength = 10
 maxLength = 40
 
@@ -434,21 +282,21 @@ type = "boolean"
 description = "True once the person has said yes to this change. Without it, nothing changes."
 
 [[commands]]
-kind = "google.event_delete"
+kind = "gcal.delete"
 title = "Delete an event (id, confirm)"
-slash = "event-delete"
+slash = "delete"
 summary = "Delete a calendar event; needs confirm=true"
 
-# From EventDeleteParams in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From DeleteParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.event_delete: delete an event. Only once the person has said yes."
+description = "gcal.delete: delete an event. Only once the person has said yes."
 required = ["id"]
 additionalProperties = false
 
 [commands.params.properties.id]
 type = "string"
-description = "The event's id, from google.events."
+description = "The event's id, from gcal.events."
 minLength = 1
 maxLength = 1024
 
@@ -473,15 +321,15 @@ type = "boolean"
 description = "True once the person has said yes to deleting it. Without it, nothing is deleted."
 
 [[commands]]
-kind = "google.freebusy"
+kind = "gcal.freebusy"
 title = "When calendars are busy (from, to, emails?)"
 slash = "freebusy"
 summary = "The busy times of the account's calendar, or of the people named, between two times"
 
-# From FreebusyParams in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From FreebusyParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.freebusy: when calendars are busy between two times."
+description = "gcal.freebusy: when calendars are busy between two times."
 required = ["from", "to"]
 additionalProperties = false
 
@@ -510,16 +358,16 @@ maxLength = 32
 pattern = "^([a-z0-9][a-z0-9._-]*)?$"
 
 [[commands]]
-kind = "google.add"
+kind = "gcal.add"
 title = "Add a Google account"
 slash = "add"
 form = "account"
-summary = "Sign a Google account in for Gmail and Calendar, on every node"
+summary = "Sign a Google account in for Google Calendar, on every node"
 
-# From AddParams in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From AddParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.add: a Google account's sign-in, added in the apps."
+description = "gcal.add: a Google account's sign-in, added in the apps."
 additionalProperties = false
 
 [commands.params.properties.name]
@@ -529,14 +377,14 @@ maxLength = 32
 pattern = "^([a-z0-9][a-z0-9._-]*)?$"
 
 [[commands]]
-kind = "google.client"
+kind = "gcal.client"
 title = "Add your Google OAuth client"
 slash = "client"
 form = "client"
 summary = "The Google OAuth client the sign-ins go through: a Web application client in your Cloud project"
 
-# From ClientParams in proto/google/v1/google.proto: `pointman-extension manifest write`
+# From ClientParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.client: the Google OAuth client the sign-ins go through, added in the apps."
+description = "gcal.client: the Google OAuth client the sign-ins go through, added in the apps."
 additionalProperties = false
