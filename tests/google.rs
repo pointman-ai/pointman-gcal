@@ -69,7 +69,8 @@ fn a_sign_in_comes_back_by_redirect_and_is_exchanged_with_its_pkce_verifier() {
     assert!((16..=128).contains(&state.len()), "core takes 16 to 128 characters: {state}");
     assert!(state.chars().all(|c| c.is_ascii_alphanumeric() || "._~-".contains(c)), "{state}");
     assert_eq!(query_of(url, "state"), state);
-    assert_eq!(started["waits"], json!(false), "a redirect sign-in doesn't wait");
+    // proto's JSON leaves a false out
+    assert!(!started["waits"].as_bool().unwrap_or(false), "a redirect sign-in doesn't wait: {started}");
     assert!(started.get("code").is_none(), "nothing to show or paste");
 
     // core's callback gives the node Google's code: exchanged with the verifier whose challenge was in the link

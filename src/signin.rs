@@ -14,8 +14,7 @@ use std::time::{Duration, Instant};
 use anyhow::{anyhow, bail};
 use base64::engine::general_purpose::URL_SAFE_NO_PAD;
 use base64::Engine as _;
-use pointman_extension::{Request, Side};
-use serde::{Deserialize, Serialize};
+use pointman_extension::protocol::CredentialsSignInResponse;
 use sha2::{Digest, Sha256};
 
 use crate::google::{segment, token_answer, Endpoints, Failure, OAuthClient};
@@ -39,45 +38,6 @@ pub const NEEDED: [&str; 3] = [
 
 /// How long a sign-in waits for its code, at most.
 pub const WAIT: Duration = Duration::from_secs(30 * 60);
-
-/// The node's `credentials.sign_in`, with `redirect_uri`, which core's protocol gained for sign-ins that come back
-/// by redirect: core's `{server}/oauth/callback`. The SDK's own message doesn't have it yet, so this one is read
-/// instead; a field it doesn't know (`person`) is skipped.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct SignInRequest {
-    #[serde(default)]
-    pub form: String,
-    #[serde(default)]
-    pub label: String,
-    #[serde(default)]
-    pub session: Option<SessionRef>,
-    #[serde(default, alias = "redirectUri")]
-    pub redirect_uri: String,
-}
-
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct SessionRef {
-    #[serde(default)]
-    pub id: String,
-}
-
-/// The answer: the link to open, what to tell the person, and `state`, which says the link comes back by redirect.
-#[derive(Debug, Default, Clone, Serialize, Deserialize)]
-pub struct SignInResponse {
-    pub url: String,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub prompt: Option<String>,
-    #[serde(default)]
-    pub waits: bool,
-    #[serde(default, skip_serializing_if = "String::is_empty")]
-    pub state: String,
-}
-
-impl Request for SignInRequest {
-    const METHOD: &'static str = "credentials.sign_in";
-    const SIDE: Side = Side::Process;
-    type Response = SignInResponse;
-}
 
 struct Pending {
     client: OAuthClient,
@@ -155,7 +115,8 @@ fn unescape(s: &str) -> String {
 }
 
 impl SignIns {
-    /// Start one: Google's link, and the state core matches its callback to.
+    /// Start one: Google's link, and the state core matches its callback to (`state` says the link comes back by
+    /// redirect, to the node's `redirect_uri`).
     pub fn start(
         &self,
         ends: &Endpoints,
@@ -163,7 +124,7 @@ impl SignIns {
         session: &str,
         redirect: &str,
         label: &str,
-    ) -> anyhow::Result<SignInResponse> {
+    ) -> anyhow::Result<CredentialsSignInResponse> {
         if session.is_empty() {
             bail!("a sign-in needs the node's session");
         }
@@ -193,7 +154,7 @@ impl SignIns {
                 until: Instant::now() + WAIT,
             },
         );
-        Ok(SignInResponse { url, prompt: Some(prompt), waits: false, state })
+        Ok(CredentialsSignInResponse { url, prompt: Some(prompt), state: Some(state), ..Default::default() })
     }
 
     /// Core's callback gave the code: the refresh token, once Google takes it with the verifier.

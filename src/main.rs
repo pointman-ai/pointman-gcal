@@ -12,7 +12,7 @@ use anyhow::{anyhow, bail};
 use google::accounts::{self, item};
 use google::google::{access_token, agent, segment, Api, Endpoints, OAuthClient};
 use google::mail::{self, Draft};
-use google::signin::{self, SignInRequest, SignIns};
+use google::signin::{self, SignIns};
 use google::v1::{
     Account, AccountsParams, AccountsResult, AddParams, AddResult, Busy, Calendar, CalendarsParams, CalendarsResult,
     ClientParams, ClientResult, EventCreateParams, EventCreateResult, EventDeleteParams, EventDeleteResult,
@@ -21,7 +21,7 @@ use google::v1::{
     MailSendResult, Problem, Settings, Span,
 };
 use google::{and, calendar, count, CLIENT_ITEM};
-use pointman_extension::protocol::{CredentialsCodeRequest, CredentialsCodeResponse};
+use pointman_extension::protocol::{CredentialsCodeRequest, CredentialsCodeResponse, CredentialsSignInRequest};
 use pointman_extension::{Extension, Handle, Job};
 use regex::Regex;
 use serde_json::{json, Value};
@@ -728,7 +728,7 @@ fn main() -> anyhow::Result<()> {
 
     // Sign in from the apps: Google's authorization-code flow with PKCE, back through core's /oauth/callback
     let (xx, si) = (x.clone(), signins.clone());
-    ext.on(move |p: SignInRequest| {
+    ext.on(move |p: CredentialsSignInRequest| {
         if p.form != "account" {
             bail!("the Google extension signs in accounts only (form: account); the OAuth client is pasted with /google client");
         }
@@ -736,7 +736,7 @@ fn main() -> anyhow::Result<()> {
         if label == CLIENT_ITEM.trim_start_matches("google.") {
             bail!("{CLIENT_ITEM} is the OAuth client's place in the vault: call the account something else");
         }
-        let session = p.session.as_ref().map(|s| s.id.as_str()).unwrap_or_default();
+        let session = p.session.as_option().map(|s| s.id.as_str()).unwrap_or_default();
         si.start(&xx.ends, xx.client()?, session, &p.redirect_uri, label)
     });
     let (xx, si) = (x.clone(), signins);
