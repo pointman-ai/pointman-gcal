@@ -184,7 +184,8 @@ fn accounts_say_each_address_and_whether_its_sign_in_works() {
     let accounts = done.result["accounts"].as_array().unwrap();
     assert_eq!(accounts.len(), 2, "the client isn't an account: {accounts:?}");
     let home = &accounts[0];
-    assert_eq!((home["label"].as_str(), home["works"].as_bool()), (Some("home"), Some(false)));
+    // proto's JSON leaves a false out
+    assert_eq!((home["label"].as_str(), home["works"].as_bool().unwrap_or(false)), (Some("home"), false));
     assert!(home["error"].as_str().unwrap().contains("/google add home"), "{home}");
     let work = &accounts[1];
     assert_eq!(work["email"], "james@work.example.com");
