@@ -45,7 +45,7 @@ grant Gmail or Calendar.
 | `google.calendars {account?}` | The calendars each account has |
 | `google.events {from, to, calendar?, query?, account?}` | Events between two times, soonest first, each repeat on its own |
 | `google.event_create {title, start, end, …, confirm}` | A new event, with attendees, a Meet link (`meet`) and invitations (`notify`) if asked |
-| `google.event_update {id, …, confirm}` | Changes only the fields given |
+| `google.event_update {id, …, confirm}` | Changes only the fields given (`attendees` replaces the whole list) |
 | `google.event_delete {id, confirm}` | Deletes an event |
 | `google.freebusy {from, to, emails?, account?}` | Busy times of the account's calendar, or of the people named |
 | `/google add`, `/google client` | Open the forms for an account's sign-in and for the OAuth client, in the app |

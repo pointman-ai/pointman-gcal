@@ -63,6 +63,8 @@ pub struct State {
     pub redirect: String,
     pub granted: String,
     pub made: u32,
+    /// What the token endpoint answers instead, as it is, when set: a status and a body that isn't JSON.
+    pub garbled: Option<(u16, String)>,
 }
 
 #[derive(Clone)]
@@ -201,14 +203,20 @@ impl Fake {
             form: form.clone(),
             json: as_json.clone(),
         });
-        let (status, out) = if path == "/token" {
-            self.oauth(&form)
-        } else if account.is_empty() {
-            error(401, "authError", "Invalid Credentials")
-        } else {
-            self.api(&account, &method, &path, &query, &as_json)
+        let garbled = if path == "/token" { self.state().garbled.clone() } else { None };
+        let (status, text) = match garbled {
+            Some(answer) => answer,
+            None => {
+                let (status, out) = if path == "/token" {
+                    self.oauth(&form)
+                } else if account.is_empty() {
+                    error(401, "authError", "Invalid Credentials")
+                } else {
+                    self.api(&account, &method, &path, &query, &as_json)
+                };
+                (status, if out.is_null() { String::new() } else { out.to_string() })
+            }
         };
-        let text = if out.is_null() { String::new() } else { out.to_string() };
         let head = format!(
             "HTTP/1.1 {status} {}\r\nContent-Type: application/json; charset=UTF-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             if status < 400 { "OK" } else { "Error" },

@@ -18,7 +18,7 @@ use pointman_extension::{Request, Side};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 
-use crate::google::{json, segment, send, Endpoints, Failure, OAuthClient};
+use crate::google::{segment, token_answer, Endpoints, Failure, OAuthClient};
 
 /// What a sign-in asks for: who the account is (`openid email`), its mail read, labelled and drafted
 /// (`gmail.modify`), sent (`gmail.send`), and its calendars (`calendar`).
@@ -207,7 +207,7 @@ impl SignIns {
         if code.is_empty() {
             bail!("Google gave no code: start the sign-in again");
         }
-        let got = send(agent.post(&format!("{}/token", ends.oauth)).send_form(&[
+        let got = token_answer(agent.post(&format!("{}/token", ends.oauth)).send_form(&[
             ("code", code.as_str()),
             ("client_id", p.client.id.as_str()),
             ("client_secret", p.client.secret.as_str()),
@@ -216,7 +216,7 @@ impl SignIns {
             ("code_verifier", p.verifier.as_str()),
         ]));
         let v = match got {
-            Ok(r) => json(r)?,
+            Ok(v) => v,
             Err(Failure::Said { reason, .. }) if reason == "invalid_grant" => bail!(
                 "Google didn't take the sign-in's code (invalid_grant: it ran out or was used already): start the \
                  sign-in again"

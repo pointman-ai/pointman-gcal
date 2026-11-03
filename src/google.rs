@@ -119,9 +119,24 @@ impl std::fmt::Display for Failure {
 
 impl std::error::Error for Failure {}
 
+/// The start of a body that can't be read, for an error; with `quote` false (OAuth's token endpoint, whose answers
+/// hold tokens), none of it.
+fn unread(body: &str, quote: bool) -> String {
+    if quote {
+        body.chars().take(200).collect()
+    } else {
+        "its body is left out, as it may hold a token".to_string()
+    }
+}
+
 /// The reason and words of Google's error body, as its APIs (`{error: {code, message, status, errors: [{reason}]}}`)
 /// or OAuth (`{error, error_description}`) say them.
 pub fn said(status: u16, body: &str) -> Failure {
+    said_as(status, body, true)
+}
+
+/// As `said`; with `quote` false, a body that isn't Google's error JSON is left out, not quoted.
+fn said_as(status: u16, body: &str, quote: bool) -> Failure {
     let v: Value = serde_json::from_str(body).unwrap_or(Value::Null);
     let (reason, message) = match &v["error"] {
         Value::Object(e) => (
@@ -133,7 +148,7 @@ pub fn said(status: u16, body: &str) -> Failure {
             e.get("message").and_then(Value::as_str).unwrap_or_default().to_string(),
         ),
         Value::String(e) => (e.clone(), v["error_description"].as_str().unwrap_or_default().to_string()),
-        _ => (String::new(), body.chars().take(200).collect()),
+        _ => (String::new(), unread(body, quote)),
     };
     Failure::Said { status, reason, message }
 }
@@ -156,6 +171,11 @@ pub fn send(r: Result<ureq::Response, ureq::Error>) -> Result<ureq::Response, Fa
 
 /// A response's JSON: an empty body (a delete's 204) is null.
 pub fn json(r: ureq::Response) -> Result<Value, Failure> {
+    json_as(r, true)
+}
+
+/// As `json`; with `quote` false, a body that isn't JSON is left out of the error, not quoted.
+fn json_as(r: ureq::Response, quote: bool) -> Result<Value, Failure> {
     let status = r.status();
     let text = body(r);
     if text.trim().is_empty() {
@@ -164,8 +184,18 @@ pub fn json(r: ureq::Response) -> Result<Value, Failure> {
     serde_json::from_str(&text).map_err(|_| Failure::Said {
         status,
         reason: String::new(),
-        message: format!("not JSON: {}", text.chars().take(200).collect::<String>()),
+        message: format!("not JSON: {}", unread(&text, quote)),
     })
+}
+
+/// OAuth's token endpoint's answer, as `send` and then `json`, but its body holds tokens: an error says the `error`
+/// and `error_description` Google gives as JSON, and never quotes a body it can't read.
+pub fn token_answer(r: Result<ureq::Response, ureq::Error>) -> Result<Value, Failure> {
+    match r {
+        Ok(r) => json_as(r, false),
+        Err(ureq::Error::Status(status, r)) => Err(said_as(status, &body(r), false)),
+        Err(ureq::Error::Transport(t)) => Err(Failure::Lost(t.to_string())),
+    }
 }
 
 /// An access token for a refresh token: the token and how long it lasts.
@@ -176,7 +206,7 @@ pub fn access_token(
     refresh: &str,
     item: &str,
 ) -> anyhow::Result<(String, Duration)> {
-    let got = send(agent.post(&format!("{}/token", ends.oauth)).send_form(&[
+    let got = token_answer(agent.post(&format!("{}/token", ends.oauth)).send_form(&[
         ("client_id", client.id.as_str()),
         ("client_secret", client.secret.as_str()),
         ("refresh_token", refresh),
@@ -184,7 +214,7 @@ pub fn access_token(
     ]));
     let label = item.trim_start_matches("google.");
     let v = match got {
-        Ok(r) => json(r)?,
+        Ok(v) => v,
         Err(Failure::Said { reason, .. }) if reason == "invalid_grant" => {
             return Err(anyhow!(
                 "Google no longer takes {item}'s sign-in (invalid_grant: revoked, unused for 6 months, or 7 days old \

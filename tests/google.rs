@@ -126,6 +126,34 @@ fn a_code_with_another_verifier_or_redirect_is_refused() {
 }
 
 #[test]
+fn a_token_answer_that_isnt_json_is_left_out_of_the_error() {
+    // a cut-off answer and an error page, each holding tokens: a sign-in's exchange and a refresh say neither
+    let leaked = "ya29.LEAKEDaccessTOKENfor-the-tests";
+    let answers = [
+        (200, format!(r#"{{"access_token": "{leaked}", "refresh_token": "{NEW_REFRESH}", "expires_in": 35"#)),
+        (502, format!("<html><body>upstream: {leaked} {NEW_REFRESH}</body></html>")),
+    ];
+    for (status, body) in answers {
+        let fake = Fake::start();
+        fake.state().garbled = Some((status, body));
+        let node = node_with(&fake, json!({}), vec![client(), ("google.work", WORK_REFRESH.to_string())]);
+        sign_in(&node, "sgn_1", "work").unwrap();
+        let exchange = node
+            .call("credentials.code", json!({"form": "account", "session": {"id": "sgn_1"}, "code": CODE}))
+            .unwrap_err();
+        let refresh = node.run("google.mail_search", json!({"query": "x", "account": "work"})).unwrap_err();
+        for e in [exchange.message, refresh.message] {
+            assert!(e.contains(&format!("Google said {status}")) && e.contains("left out"), "{e}");
+            for secret in [leaked, NEW_REFRESH, WORK_REFRESH, CODE] {
+                assert!(!e.contains(secret), "{secret} in the error: {e}");
+            }
+        }
+        let log = node.log();
+        assert!(!log.contains(leaked) && !log.contains(NEW_REFRESH), "a token in the log: {log}");
+    }
+}
+
+#[test]
 fn a_sign_in_that_leaves_out_a_scope_is_refused() {
     let fake = Fake::start();
     let node = node_with(&fake, json!({}), vec![client()]);

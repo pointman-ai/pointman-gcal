@@ -20,7 +20,7 @@ a meeting, when people are free. Skip it otherwise.
 | The calendars an account has | `google.calendars {account?}` |
 | Events between two times, soonest first | `google.events {from, to, calendar?, query?, account?}` |
 | A new event (Meet link with `meet`, invitations with `notify`) | `google.event_create {title, start, end, time_zone?, description?, location?, attendees?, meet?, notify?, calendar?, account?, confirm}` |
-| Change an event: only the fields given | `google.event_update {id, title?, start?, end?, …, notify?, account?, confirm}` |
+| Change an event: only the fields given (`attendees` replaces the whole list) | `google.event_update {id, title?, start?, end?, …, attendees?, notify?, account?, confirm}` |
 | Delete an event | `google.event_delete {id, notify?, account?, confirm}` |
 | When people are busy | `google.freebusy {from, to, emails?, account?}` |
 
@@ -37,6 +37,10 @@ after their yes, for what they said yes to. Never set it on your own. A draft ne
 **`notify: true` is a send.** It emails every attendee from that account: the invitation, the change, or that the event
 is off. Ask it as you would a message, naming who gets it, and set it only when the person says to tell them. It's off
 unless given, and the event still needs `confirm`.
+
+**Adding or removing someone:** `event_update`'s `attendees` replaces the whole list, so whoever you leave out is taken
+off the event (and with `notify`, emailed that they're off it). Read the event first (`google.events` gives its
+attendees), then pass everyone who should stay, plus the change.
 
 **Mail is private.** A message's words come back in `body`, and a search's in `snippet`: read them to do the task, then
 tell the person what's there in your own words. Post a message's text, or forward it, only when they ask. Run mail
