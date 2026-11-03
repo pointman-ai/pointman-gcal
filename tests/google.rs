@@ -1,7 +1,7 @@
 //! The extension's commands under a stand-in node, against a fake Google (tests/common): sign-ins that come back by
 //! redirect with PKCE, reads across every account that say which they used, writes that stop rather than pick an
-//! account, and nothing sent or changed without `confirm`. No real Google is called: the extension is pointed at the
-//! fake through GOOGLE_GMAIL_BASE, GOOGLE_CALENDAR_BASE and GOOGLE_OAUTH_BASE.
+//! account, mail sent when asked, and no event changed without `confirm`. No real Google is called: the extension is
+//! pointed at the fake through GOOGLE_GMAIL_BASE, GOOGLE_CALENDAR_BASE and GOOGLE_OAUTH_BASE.
 
 mod common;
 
@@ -322,23 +322,18 @@ fn a_draft_reply_goes_in_its_thread_and_nothing_is_sent() {
 }
 
 #[test]
-fn mail_is_sent_only_with_confirm() {
+fn mail_is_sent_when_asked_and_takes_no_confirm() {
     let fake = Fake::start();
     let node = both(&fake);
     let params = json!({"to": ["bob@example.com"], "subject": "Notes", "body": "Here they are.", "account": "work"});
-    for confirm in [json!(null), json!(false)] {
-        let mut p = params.clone();
-        if !confirm.is_null() {
-            p["confirm"] = confirm;
-        }
-        let e = node.run("google.mail_send", p).unwrap_err();
-        assert!(e.message.contains("confirm=true") && e.message.contains("\"Notes\" to bob@example.com"), "{e:?}");
-    }
-    assert!(fake.requests().is_empty(), "no token asked for, nothing sent: {:?}", fake.requests());
-
+    // the yes before a send is the workflow's or the task's: a confirm is refused as a field it doesn't have
     let mut p = params.clone();
     p["confirm"] = json!(true);
-    let done = node.run("google.mail_send", p).unwrap();
+    let e = node.run("google.mail_send", p).unwrap_err();
+    assert!(e.message.contains("confirm isn't a field"), "{e:?}");
+    assert!(fake.requests().is_empty(), "no token asked for, nothing sent: {:?}", fake.requests());
+
+    let done = node.run("google.mail_send", params).unwrap();
     assert!(done.result["text"].as_str().unwrap().starts_with("Sent \"Notes\" to bob@example.com from work"));
     let sent = fake.mailbox("work").sent;
     assert_eq!(common::raw_body(sent[0]["raw"].as_str().unwrap()), "Here they are.");
@@ -351,13 +346,10 @@ fn mail_is_sent_only_with_confirm() {
         )
         .unwrap();
     let draft = drafted.result["draft"].as_str().unwrap().to_string();
-    let e = node.run("google.mail_send", json!({"draft": draft, "account": "work"})).unwrap_err();
-    assert!(e.message.contains(&format!("draft {draft}")), "{e:?}");
-    let e = node
-        .run("google.mail_send", json!({"draft": draft, "subject": "x", "account": "work", "confirm": true}))
-        .unwrap_err();
+    assert_eq!(fake.mailbox("work").sent.len(), 1, "a draft isn't sent");
+    let e = node.run("google.mail_send", json!({"draft": draft, "subject": "x", "account": "work"})).unwrap_err();
     assert!(e.message.contains("not both"), "{e:?}");
-    let done = node.run("google.mail_send", json!({"draft": draft, "account": "work", "confirm": true})).unwrap();
+    let done = node.run("google.mail_send", json!({"draft": draft, "account": "work"})).unwrap();
     assert_eq!(done.result["to"], json!(["ann@example.com"]));
     assert_eq!(done.result["subject"], "Plan");
     assert_eq!(fake.mailbox("work").sent.len(), 2);

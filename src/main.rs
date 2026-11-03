@@ -1,7 +1,8 @@
 //! The extension's process: the node starts it (`bin/google`, from the extension's folder) and talks to it over stdin
 //! and stdout. It searches, reads, drafts and sends mail, lists and changes calendar events, and signs Google accounts
-//! in from the apps. Nothing reaches Google without a sign-in in the vault; nothing is sent, and no event made, changed
-//! or deleted, without `confirm`; and no token, code or message body is ever logged.
+//! in from the apps. Nothing reaches Google without a sign-in in the vault; mail is sent when mail_send is called
+//! (the yes before it is the workflow's or the task's); no event is made, changed or deleted without `confirm`; and no
+//! token, code or message body is ever logged.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
@@ -326,7 +327,7 @@ fn mail_draft(x: &Ext, _: &Job, p: MailDraftParams) -> anyhow::Result<MailDraftR
         Ok(MailDraftResult {
             text: format!(
                 "Drafted \"{}\" to {} in {label}{reply_note}: draft {draft}. Nothing is sent: google.mail_send with \
-                 draft={draft} sends it once the person says yes.",
+                 draft={draft} sends it.",
                 d.subject,
                 and(&d.to)
             ),
@@ -359,14 +360,6 @@ fn mail_send(x: &Ext, _: &Job, p: MailSendParams) -> anyhow::Result<MailSendResu
         bail!("give a draft, or to, subject and body, not both: a draft is sent as it is");
     }
     let label = x.write(&p.account, "google.mail_send")?;
-    if !p.confirm {
-        let what =
-            if draft.is_empty() { format!("\"{}\" to {}", p.subject, and(&p.to)) } else { format!("draft {draft}") };
-        bail!(
-            "not sent: google.mail_send needs confirm=true, given only once the person has said yes to sending {what} \
-             from {label}"
-        );
-    }
     x.api(&label, |api| {
         let (sent, to, subject) = if draft.is_empty() {
             let raw = direct.raw()?;

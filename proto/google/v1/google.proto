@@ -144,7 +144,7 @@ message MailDraftResult {
   string subject = 7;
 }
 
-// google.mail_send: send a draft, or a new message. Only once the person has said yes.
+// google.mail_send: send a draft, or a new message. It goes at once: send only what the task or workflow asked for.
 message MailSendParams {
   // A draft's id (google.mail_draft's) to send as it is. Or leave it out and give to, subject and body.
   string draft = 1 [(buf.validate.field).string = {max_len: 128, pattern: "^([A-Za-z0-9_-]+)?$"}];
@@ -157,8 +157,6 @@ message MailSendParams {
   string body = 5 [(buf.validate.field).string.max_len = 100000];
   // The label of the Google account it's from. Empty: the account setting's, or the only one signed in.
   string account = 6 [(buf.validate.field).string = {max_len: 32, pattern: "^([a-z0-9][a-z0-9._-]*)?$"}];
-  // True once the person has said yes to sending this, to these people. Without it, nothing is sent.
-  bool confirm = 7;
 }
 
 message MailSendResult {

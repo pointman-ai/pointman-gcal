@@ -2,8 +2,9 @@
 
 A Pointman extension that gives every agent Gmail and Google Calendar, with any number of Google accounts. Each
 account is signed in from the Pointman apps and kept in the vault as `google.<label>`, so every machine with the
-extension uses the same sign-ins, and no agent depends on one person's own connectors. Agents read freely; sending
-mail and creating, changing or deleting events need `confirm: true`, given once the person has said yes.
+extension uses the same sign-ins, and no agent depends on one person's own connectors. Agents read freely. Mail is
+sent when `google.mail_send` is called: the yes before a send is the workflow's or the task's. Creating, changing or
+deleting events needs `confirm: true`, given once the person has said yes.
 
 | File | What |
 |---|---|
@@ -41,7 +42,7 @@ grant Gmail or Calendar.
 | `google.mail_search {query, account?, limit?}` | Messages matching a Gmail search, newest first, from every account unless one is named |
 | `google.mail_read {id, account?}` | One message: headers, its text (`body`), attachments' names |
 | `google.mail_draft {to, cc?, subject, body, reply_to?, account?}` | A draft, nothing sent; `reply_to` puts it in the message's thread |
-| `google.mail_send {draft \| to, cc?, subject, body, account?, confirm}` | Sends a draft or a new message. Refused without `confirm: true` |
+| `google.mail_send {draft \| to, cc?, subject, body, account?}` | Sends a draft or a new message, at once |
 | `google.calendars {account?}` | The calendars each account has |
 | `google.events {from, to, calendar?, query?, account?}` | Events between two times, soonest first, each repeat on its own |
 | `google.event_create {title, start, end, …, confirm}` | A new event, with attendees, a Meet link (`meet`) and invitations (`notify`) if asked |

@@ -1,8 +1,9 @@
 # Google on Pointman: Gmail and Google Calendar for every agent on the machines it's installed on, with any number of
 # Google accounts. Each account is signed in from the apps (Google's authorization-code flow with PKCE, coming back
 # through core's /oauth/callback: nothing to paste), and its refresh token is kept in the vault as google.<label>, so
-# every node uses the same sign-ins. Reads go to every account unless a call names one; sending mail and changing a
-# calendar need confirm=true, given once the person has said yes.
+# every node uses the same sign-ins. Reads go to every account unless a call names one. Mail is sent when mail_send is
+# called (the yes before it is the workflow's or the task's); changing a calendar needs confirm=true, given once the
+# person has said yes.
 #
 # The commands' params and [settings] are written from proto/google/v1/google.proto (`<Verb>Params`, `Settings`) by
 # the SDK's `pointman-extension manifest write`: change the proto, then write them again.
@@ -181,14 +182,14 @@ pattern = "^([a-z0-9][a-z0-9._-]*)?$"
 
 [[commands]]
 kind = "google.mail_send"
-title = "Send mail (draft, or to/subject/body; confirm)"
+title = "Send mail (draft, or to/subject/body)"
 slash = "send"
-summary = "Send a draft or a new message; needs confirm=true, given once the person said yes"
+summary = "Send a draft or a new message, at once: only what the task or workflow asked for"
 
 # From MailSendParams in proto/google/v1/google.proto: `pointman-extension manifest write`
 [commands.params]
 type = "object"
-description = "google.mail_send: send a draft, or a new message. Only once the person has said yes."
+description = "google.mail_send: send a draft, or a new message. It goes at once: send only what the task or workflow asked for."
 additionalProperties = false
 
 [commands.params.properties.draft]
@@ -223,10 +224,6 @@ type = "string"
 description = "The label of the Google account it's from. Empty: the account setting's, or the only one signed in."
 maxLength = 32
 pattern = "^([a-z0-9][a-z0-9._-]*)?$"
-
-[commands.params.properties.confirm]
-type = "boolean"
-description = "True once the person has said yes to sending this, to these people. Without it, nothing is sent."
 
 [[commands]]
 kind = "google.calendars"

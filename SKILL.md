@@ -16,7 +16,7 @@ a meeting, when people are free. Skip it otherwise.
 | Find mail (Gmail's search: `from:bob newer_than:7d`, `is:unread in:inbox`) | `google.mail_search {query, account?, limit?}` |
 | Read one message: headers, its text in `body`, attachments' names | `google.mail_read {id, account?}` |
 | A draft, nothing sent (`reply_to` a message's id: in its thread, to its sender, `Re:` its subject) | `google.mail_draft {to, cc?, subject, body, reply_to?, account?}` |
-| Send a draft, or a new message | `google.mail_send {draft \| to, cc?, subject, body, account?, confirm}` |
+| Send a draft, or a new message, at once | `google.mail_send {draft \| to, cc?, subject, body, account?}` |
 | The calendars an account has | `google.calendars {account?}` |
 | Events between two times, soonest first | `google.events {from, to, calendar?, query?, account?}` |
 | A new event (Meet link with `meet`, invitations with `notify`) | `google.event_create {title, start, end, time_zone?, description?, location?, attendees?, meet?, notify?, calendar?, account?, confirm}` |
@@ -29,14 +29,18 @@ read uses the `account` setting's, else every account, and says which each resul
 or the only one, and with several it stops and lists them. Then ask the person which, never guess. `google.accounts`
 says whose each one is.
 
-**Ask first, every time.** Sending mail, and creating, changing or deleting an event, are the person's call. Post
-exactly what will happen as a decision: for mail, who it's to and from which account, the subject and the whole text;
-for an event, its title, times, calendar, attendees, and whether they're emailed (`notify`). Pass `confirm: true` only
-after their yes, for what they said yes to. Never set it on your own. A draft needs no yes, but say what you drafted.
+**Sending is real.** `google.mail_send` sends as soon as it's called, and a sent message can't be taken back. Send
+only what the task or its workflow asked for: to those people, from that account, with that text. Where the workflow
+asks the person first (an `ask` step), send after their yes, exactly what they said yes to. Not asked to send it?
+Draft it (`google.mail_draft`) and say what you drafted.
+
+**Ask first for calendar writes.** Creating, changing or deleting an event is the person's call. Post exactly what will
+happen as a decision: its title, times, calendar, attendees, and whether they're emailed (`notify`). Pass
+`confirm: true` only after their yes, for what they said yes to. Never set it on your own.
 
 **`notify: true` is a send.** It emails every attendee from that account: the invitation, the change, or that the event
-is off. Ask it as you would a message, naming who gets it, and set it only when the person says to tell them. It's off
-unless given, and the event still needs `confirm`.
+is off. Ask it with the event, naming who gets it, and set it only when the person says to tell them. It's off unless
+given, and the event still needs `confirm`.
 
 **Adding or removing someone:** `event_update`'s `attendees` replaces the whole list, so whoever you leave out is taken
 off the event (and with `notify`, emailed that they're off it). Read the event first (`google.events` gives its
