@@ -1,0 +1,47 @@
+# The template's `hello` extension as a Rust binary. Rename `hello` (the id, and every command, tool
+# and event name that starts with it) to start your own.
+[extension]
+id = "hello"
+name = "Hello"
+version = "0.3.0"
+publisher = "aurelio"
+summary = "A template: one command that writes a greeting to a file."
+node = ">=0.2.0"
+platforms = ["macos-arm64", "macos-x86_64", "linux-x86_64", "linux-arm64"]
+
+[run]
+command = ["bin/hello"]      # the release build, in the package's bin/
+runtime = "binary"
+
+[permissions]
+secrets = []                 # vault names it may open, or prefixes like "hello.*"
+
+[[commands]]
+kind = "hello.greet"
+title = "Greet"
+lane = "main"                # commands in a lane run one at a time
+
+# From GreetParams in proto/hello/v1/hello.proto: `pointman-extension manifest write`
+[commands.params]
+type = "object"
+description = "Writes a greeting to a file: hello.greet."
+required = ["name"]
+additionalProperties = false
+
+[commands.params.properties.name]
+type = "string"
+description = "Who to greet."
+minLength = 1
+maxLength = 100
+
+# From Settings in proto/hello/v1/hello.proto: `pointman-extension manifest write`
+[settings]
+type = "object"
+description = "This machine's settings for the extension."
+additionalProperties = false
+
+[settings.properties.greeting]
+type = "string"
+description = "What to say before the name."
+default = "Hello"
+maxLength = 40

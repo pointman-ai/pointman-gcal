@@ -1,0 +1,26 @@
+// The hello extension's own types: its command's params and result, and its settings. extension.toml's schemas are
+// made from this file (`pointman-extension manifest write`), and so are the Rust types src/main.rs uses (build.rs).
+// Rename `hello` here too: the folder, the file and the package are the extension's id.
+syntax = "proto3";
+
+package hello.v1;
+
+import "buf/validate/validate.proto";
+import "pointman/v1/options.proto";
+
+// Writes a greeting to a file: hello.greet.
+message GreetParams {
+  // Who to greet.
+  string name = 1 [(buf.validate.field).required = true, (buf.validate.field).string = {min_len: 1, max_len: 100}];
+}
+
+message GreetResult {
+  // The greeting it wrote.
+  string text = 1;
+}
+
+// This machine's settings for the extension.
+message Settings {
+  // What to say before the name.
+  string greeting = 1 [(buf.validate.field).string.max_len = 40, (pointman.v1.setting).default = "Hello"];
+}
