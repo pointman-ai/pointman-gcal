@@ -1,29 +1,62 @@
-# hello: a Pointman extension template
+# google
 
-A compiled extension in Rust: one command, `hello.greet`, that writes a greeting to a file and reports
-it. Make a repo from this template named `pointman-<id>`, with the topic `pointman-extension`, rename
-`hello` everywhere (Cargo.toml, the id in extension.toml, the command, tool and event names, and the
-folder, file and package of proto/hello/v1/hello.proto), and write your own commands in `src/main.rs`.
-It's MIT, as every extension repo is by default.
+A Pointman extension that gives every agent Gmail and Google Calendar, with any number of Google accounts. Each
+account is signed in from the Pointman apps and kept in the vault as `google.<label>`, so every machine with the
+extension uses the same sign-ins, and no agent depends on one person's own connectors. Agents read freely. Mail is
+sent when `google.mail_send` is called: the yes before a send is the workflow's or the task's. Creating, changing or
+deleting events needs `confirm: true`, given once the person has said yes.
 
-- **The SDK:** [pointman-extension](https://github.com/pointman-ai/pointman-extension) speaks the
-  node's protocol over stdin and stdout, so `src/main.rs` only declares commands and answers them.
-- **Its own proto:** `proto/hello/v1/hello.proto` holds the command's params and result (`GreetParams`,
-  `GreetResult`: `hello.<verb>` takes `<Verb>Params`) and the settings (`Settings`), with each field's doc and
-  limits. `pointman-extension manifest write` makes extension.toml's `params` and `[settings]` from it, keeping the
-  rest of the file (install it with `cargo install --git https://github.com/pointman-ai/pointman-extension
-  --features proto pointman-extension`), and build.rs makes the Rust types `src/main.rs` takes. `tests/manifest.rs`
-  fails while extension.toml is stale. It's the recommended way, not the only one: hand-written schemas in
-  extension.toml still work (drop proto/, build.rs and tests/manifest.rs, and use `ext.command`).
-- **Run the tests:** `cargo test`. They start the built binary the way a node does, against the SDK's
-  stand-in node (`testing::StandIn`), which also answers secrets within the manifest's permissions.
-- **Try it on a machine:** `cargo build --release`, copy `target/release/hello` to `bin/hello`, then
-  `pointman add .` from this folder, and run its command from any thread.
-- **Release it:** bump `version` in extension.toml, then push the tag (`git tag v0.1.1 && git push
-  origin v0.1.1`). `release.yml` builds macOS (Apple silicon and Intel) and Linux (x86_64 and arm64,
-  static), attaches `hello-<version>-<platform>.tar.gz` for each, and core takes the release into the
-  workspace's catalogue. Machines install it with `pointman add hello` and move to new releases with
-  `pointman upgrade`.
+| File | What |
+|---|---|
+| `SKILL.md` | The agents' guidance: the commands, accounts, asking first, keeping mail private |
+| `proto/google/v1/google.proto` | The commands' params and results, and the settings |
+| `src/` | The process: `signin` (authorization code + PKCE), `accounts` (which account a call uses), `mail`, `calendar`, `google` (the HTTP calls) |
 
-An extension in Python is still possible (Pointman's `sdk/template`), for one that wraps a Python app's
-own API, as Resolve and Blender do.
+## Install
+
+```
+pointman add pointman-ai/pointman-google
+```
+
+## Set it up once
+
+1. **An OAuth client.** In [Google Cloud console](https://console.cloud.google.com/), in a project of yours:
+   - APIs & Services › Library: turn on the **Gmail API** and the **Google Calendar API**.
+   - OAuth consent screen: add the scopes below, and publish it **In production** (or make it **Internal** for a
+     Google Workspace organisation). While it's in Testing, Google's refresh tokens run out after 7 days.
+   - Credentials › Create OAuth client ID › **Web application**, with the authorised redirect URI
+     `https://<your Pointman>/oauth/callback` (`https://james.pointman.network/oauth/callback`, say).
+2. **`/google client`** in the app: paste the client's ID, a space, then its secret.
+3. **`/google add <label>`** for each account (`/google add work`, `/google add personal`), and tap Sign in. Google's
+   page opens; pick the account and allow it. Pointman finishes the sign-in by itself: nothing to paste.
+
+The sign-in asks for `openid email`, `gmail.modify` (read, label and draft mail), `gmail.send` and `calendar`. It's
+Google's authorization-code flow with PKCE, coming back through core's `/oauth/callback`; Google's device flow can't
+grant Gmail or Calendar.
+
+## The commands
+
+| Command | What it does |
+|---|---|
+| `google.accounts {}` | Each account's label and address, and whether its sign-in works |
+| `google.mail_search {query, account?, limit?}` | Messages matching a Gmail search, newest first, from every account unless one is named |
+| `google.mail_read {id, account?}` | One message: headers, its text (`body`), attachments' names |
+| `google.mail_draft {to, cc?, subject, body, reply_to?, account?}` | A draft, nothing sent; `reply_to` puts it in the message's thread |
+| `google.mail_send {draft \| to, cc?, subject, body, account?}` | Sends a draft or a new message, at once |
+| `google.calendars {account?}` | The calendars each account has |
+| `google.events {from, to, calendar?, query?, account?}` | Events between two times, soonest first, each repeat on its own |
+| `google.event_create {title, start, end, …, confirm}` | A new event, with attendees, a Meet link (`meet`) and invitations (`notify`) if asked |
+| `google.event_update {id, …, confirm}` | Changes only the fields given (`attendees` replaces the whole list) |
+| `google.event_delete {id, confirm}` | Deletes an event |
+| `google.freebusy {from, to, emails?, account?}` | Busy times of the account's calendar, or of the people named |
+| `/google add`, `/google client` | Open the forms for an account's sign-in and for the OAuth client, in the app |
+
+**Which account.** A call may name one with `account`; the `account` setting is the default. With neither, a read uses
+every account signed in and says which each result came from, and a write uses the only one, or stops and lists them.
+
+## Develop
+
+`cargo test` runs the commands under the SDK's stand-in node against a fake Google on a local port (`tests/common`):
+no real account is called. Change a command's params in the proto, then `pointman-extension manifest write` to write
+extension.toml's schemas again; `tests/manifest.rs` fails while they differ. A release is a tag that's
+extension.toml's version (`git tag v0.1.0 && git push origin v0.1.0`): `release.yml` builds each platform.

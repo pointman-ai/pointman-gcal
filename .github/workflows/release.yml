@@ -3,7 +3,7 @@
 #
 # Push a tag that's extension.toml's version (`git tag v0.7.0 && git push origin v0.7.0`): each
 # platform is built on its own runner and packed as <id>-<version>-<platform>.tar.gz, the files at
-# its top (extension.toml, bin/<id>, README.md, LICENSE). Then one job makes the release with every
+# its top (extension.toml, bin/<id>, SKILL.md: the agents' guidance its [behavior] names, README.md, LICENSE). Then one job makes the release with every
 # archive attached. gh keeps it a draft until they're all up, so core's `released` delivery finds
 # each platform in `platforms`; one missing is refused.
 #
@@ -59,8 +59,8 @@ jobs:
           mkdir -p pkg/bin
           cp "target/${{ matrix.target }}/release/${BIN:-$ID}" "pkg/bin/$ID"
           chmod 755 "pkg/bin/$ID"
-          cp extension.toml README.md LICENSE pkg/
-          tar -czf "$ID-$VERSION-${{ matrix.platform }}.tar.gz" -C pkg extension.toml bin README.md LICENSE
+          cp extension.toml SKILL.md README.md LICENSE pkg/
+          tar -czf "$ID-$VERSION-${{ matrix.platform }}.tar.gz" -C pkg extension.toml SKILL.md bin README.md LICENSE
       - uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.platform }}
