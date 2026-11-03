@@ -1,26 +1,22 @@
-//! The extension's process: the node starts it (`bin/google`, from the extension's folder) and talks to it over stdin
-//! and stdout. It searches, reads, drafts and sends mail, lists and changes calendar events, and signs Google accounts
-//! in from the apps. Nothing reaches Google without a sign-in in the vault; mail is sent when mail_send is called
-//! (the yes before it is the workflow's or the task's); no event is made, changed or deleted without `confirm`; and no
-//! token, code or message body is ever logged.
+//! The extension's process: the node starts it (`bin/gcal`, from the extension's folder) and talks to it over stdin
+//! and stdout. It lists calendars, events and busy times, makes, changes and deletes events, and signs Google accounts
+//! in from the apps. Nothing reaches Google without a sign-in in the vault; no event is made, changed or deleted
+//! without `confirm`; and no token or code is ever logged.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use anyhow::{anyhow, bail};
-use google::accounts::{self, item};
-use google::google::{access_token, agent, segment, Api, Endpoints, OAuthClient};
-use google::mail::{self, Draft};
-use google::signin::{self, SignIns};
-use google::v1::{
+use gcal::accounts::{self, item};
+use gcal::google::{access_token, agent, segment, Api, Endpoints, OAuthClient};
+use gcal::signin::{self, SignIns};
+use gcal::v1::{
     Account, AccountsParams, AccountsResult, AddParams, AddResult, Busy, Calendar, CalendarsParams, CalendarsResult,
-    ClientParams, ClientResult, EventCreateParams, EventCreateResult, EventDeleteParams, EventDeleteResult,
-    EventUpdateParams, EventUpdateResult, EventsParams, EventsResult, FreebusyParams, FreebusyResult, MailDraftParams,
-    MailDraftResult, MailReadParams, MailReadResult, MailSearchParams, MailSearchResult, MailSendParams,
-    MailSendResult, Problem, Settings, Span,
+    ClientParams, ClientResult, CreateParams, CreateResult, DeleteParams, DeleteResult, EventsParams, EventsResult,
+    FreebusyParams, FreebusyResult, Problem, Settings, Span, UpdateParams, UpdateResult,
 };
-use google::{and, calendar, count, CLIENT_ITEM};
+use gcal::{and, calendar, count, CLIENT_ITEM};
 use pointman_extension::protocol::{CredentialsCodeRequest, CredentialsCodeResponse, CredentialsSignInRequest};
 use pointman_extension::{Extension, Handle, Job};
 use regex::Regex;
@@ -37,7 +33,7 @@ struct Ext {
 impl Ext {
     /// The accounts signed in, by label.
     fn have(&self) -> anyhow::Result<Vec<String>> {
-        Ok(accounts::labels(self.h.secrets("google.")?))
+        Ok(accounts::labels(self.h.secrets("gcal.")?))
     }
 
     fn setting(&self) -> String {
@@ -52,18 +48,18 @@ impl Ext {
         accounts::for_write(&self.have()?, asked, &self.setting(), kind)
     }
 
-    /// The Web application client the sign-ins go through: the vault's `google.client`.
+    /// The Web application client the sign-ins go through: the vault's `gcal.client`.
     fn client(&self) -> anyhow::Result<OAuthClient> {
         let value = self.h.secret(CLIENT_ITEM).map_err(|_| {
             anyhow!(
-                "no Google OAuth client yet: type /google client in the app and paste a Web application client's ID \
+                "no Google OAuth client yet: type /gcal client in the app and paste a Web application client's ID \
                  and secret"
             )
         })?;
         OAuthClient::parse(&value).ok_or_else(|| {
             anyhow!(
                 "{CLIENT_ITEM} isn't a client ID and secret (…apps.googleusercontent.com, a space, then the secret): \
-                 add it again with /google client"
+                 add it again with /gcal client"
             )
         })
     }
@@ -84,7 +80,7 @@ impl Ext {
             .expect("compiles")
             .find(&value)
             .map(|m| m.as_str().to_string())
-            .ok_or_else(|| anyhow!("{name} isn't a Google refresh token: sign it in again with /google add {label}"))?;
+            .ok_or_else(|| anyhow!("{name} isn't a Google refresh token: sign it in again with /gcal add {label}"))?;
         let (token, lasts) = access_token(&self.agent, &self.ends, &self.client()?, &refresh, &name)?;
         self.tokens.lock().unwrap_or_else(|e| e.into_inner()).insert(name, (token.clone(), Instant::now() + lasts));
         Ok(token)
@@ -118,10 +114,6 @@ fn all_failed(labels: &[String], failed: &[Problem]) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn message_url(api: &Api, id: &str) -> String {
-    api.gmail(&format!("users/me/messages/{}", segment(id)))
-}
-
 fn calendar_id(given: &str) -> String {
     match given.trim() {
         "" => "primary".to_string(),
@@ -133,8 +125,8 @@ fn accounts_list(x: &Ext, _: &Job, _: AccountsParams) -> anyhow::Result<Accounts
     let have = x.have()?;
     if have.is_empty() {
         return Ok(AccountsResult {
-            text: "No Google account is signed in: add the OAuth client with /google client if it isn't there, then \
-                   /google add <label> in the app."
+            text: "No Google account is signed in: add the OAuth client with /gcal client if it isn't there, then \
+                   /gcal add <label> in the app."
                 .into(),
             ..Default::default()
         });
@@ -144,9 +136,10 @@ fn accounts_list(x: &Ext, _: &Job, _: AccountsParams) -> anyhow::Result<Accounts
     let mut lines = Vec::new();
     for label in &have {
         let mut a = Account { label: label.clone(), chosen: *label == setting, ..Default::default() };
-        match x.api(label, |api| api.get(&api.gmail("users/me/profile"), &[])) {
+        // the account's own calendar's id is its address
+        match x.api(label, |api| api.get(&api.calendar("calendars/primary"), &[])) {
             Ok(v) => {
-                a.email = s(&v["emailAddress"]);
+                a.email = s(&v["id"]);
                 a.works = true;
                 lines.push(format!("{label} ({})", a.email));
             }
@@ -160,229 +153,6 @@ fn accounts_list(x: &Ext, _: &Job, _: AccountsParams) -> anyhow::Result<Accounts
     let chosen = if setting.is_empty() { String::new() } else { format!(" The account setting uses {setting}.") };
     out.text = format!("{}: {}.{chosen}", count(have.len(), "Google account", "Google accounts"), lines.join(", "));
     Ok(out)
-}
-
-fn mail_search(x: &Ext, _: &Job, p: MailSearchParams) -> anyhow::Result<MailSearchResult> {
-    let labels = x.reads(&p.account)?;
-    let limit = (if p.limit <= 0 { 10 } else { p.limit.min(50) }).to_string();
-    let mut out = MailSearchResult { accounts: labels.clone(), ..Default::default() };
-    for label in &labels {
-        let got = x.api(label, |api| {
-            let list =
-                api.get(&api.gmail("users/me/messages"), &[("q", p.query.as_str()), ("maxResults", limit.as_str())])?;
-            let mut found = Vec::new();
-            for m in list["messages"].as_array().into_iter().flatten() {
-                let v = api.get(
-                    &message_url(api, m["id"].as_str().unwrap_or_default()),
-                    &[
-                        ("format", "metadata"),
-                        ("metadataHeaders", "From"),
-                        ("metadataHeaders", "To"),
-                        ("metadataHeaders", "Subject"),
-                        ("metadataHeaders", "Date"),
-                    ],
-                )?;
-                found.push(mail::summary(label, &v));
-            }
-            Ok(found)
-        });
-        match got {
-            Ok(found) => out.messages.extend(found),
-            Err(e) => out.failed.push(problem(label, &e)),
-        }
-    }
-    all_failed(&labels, &out.failed)?;
-    out.messages.sort_by(|a, b| b.date.cmp(&a.date));
-    let several = labels.len() > 1;
-    let mut text = if out.messages.is_empty() {
-        format!("No messages for \"{}\" in {}.", p.query, and(&labels))
-    } else {
-        format!(
-            "{} for \"{}\" in {}, newest first:",
-            count(out.messages.len(), "message", "messages"),
-            p.query,
-            and(&labels)
-        )
-    };
-    for m in &out.messages {
-        let unread = if m.unread { " (unread)" } else { "" };
-        let at = if several { format!("{} ", m.account) } else { String::new() };
-        text.push_str(&format!("\n- {} {}: {}{unread} [{at}{}]", m.date, m.from, m.subject, m.id));
-    }
-    text.push_str(&failures(&out.failed));
-    out.text = text;
-    Ok(out)
-}
-
-fn mail_read(x: &Ext, _: &Job, p: MailReadParams) -> anyhow::Result<MailReadResult> {
-    let labels = x.reads(&p.account)?;
-    let mut errors = Vec::new();
-    for label in &labels {
-        match x.api(label, |api| api.get(&message_url(api, &p.id), &[("format", "full")])) {
-            Ok(v) => return Ok(read(label, &v)),
-            Err(e) => errors.push(format!("{label}: {e:#}")),
-        }
-    }
-    bail!("no message {} in {} ({})", p.id, and(&labels), errors.join("; "))
-}
-
-fn read(label: &str, v: &Value) -> MailReadResult {
-    let h = mail::headers(v);
-    let get = |k: &str| h.get(k).cloned().unwrap_or_default();
-    let (body, from_html) = mail::text(v);
-    let (body, truncated) = mail::cut(body, mail::MAX_BODY);
-    let attachments = mail::attachments(v);
-    let mut out = MailReadResult {
-        account: label.to_string(),
-        id: s(&v["id"]),
-        thread_id: s(&v["threadId"]),
-        from: get("from"),
-        to: get("to"),
-        cc: get("cc"),
-        subject: get("subject"),
-        date: mail::date(v),
-        labels: mail::labels(v),
-        from_html,
-        truncated,
-        message_id: get("message-id"),
-        ..Default::default()
-    };
-    let size = format!(
-        "{} of text{}{}",
-        count(body.chars().count(), "character", "characters"),
-        if from_html { ", from its HTML" } else { "" },
-        if truncated { ", cut at 100,000" } else { "" }
-    );
-    let files = if attachments.is_empty() {
-        String::new()
-    } else {
-        let names: Vec<String> = attachments.iter().map(|a| a.name.clone()).collect();
-        format!("; {}: {}", count(attachments.len(), "attachment", "attachments"), names.join(", "))
-    };
-    out.text = format!(
-        "\"{}\" from {}, {}, in {label}: {size}{files}. Its words are in body: private, so say what it's about and \
-         post them only when asked.",
-        out.subject, out.from, out.date
-    );
-    out.body = body;
-    out.attachments = attachments;
-    out
-}
-
-fn mail_draft(x: &Ext, _: &Job, p: MailDraftParams) -> anyhow::Result<MailDraftResult> {
-    let mut d = Draft {
-        to: p.to.clone(),
-        cc: p.cc.clone(),
-        subject: p.subject.clone(),
-        body: p.body.clone(),
-        ..Default::default()
-    };
-    let reply = p.reply_to.trim();
-    if reply.is_empty() {
-        if d.subject.trim().is_empty() {
-            bail!("subject: what is it about? (only a reply takes its message's)");
-        }
-        d.rfc5322()?;
-    } else {
-        mail::check_addresses("to", &d.to)?;
-        mail::check_addresses("cc", &d.cc)?;
-    }
-    let label = x.write(&p.account, "google.mail_draft")?;
-    x.api(&label, |api| {
-        let mut thread = String::new();
-        if !reply.is_empty() {
-            let orig = api.get(
-                &message_url(api, reply),
-                &[
-                    ("format", "metadata"),
-                    ("metadataHeaders", "Message-ID"),
-                    ("metadataHeaders", "References"),
-                    ("metadataHeaders", "Subject"),
-                    ("metadataHeaders", "From"),
-                    ("metadataHeaders", "Reply-To"),
-                ],
-            )?;
-            let h = mail::headers(&orig);
-            thread = s(&orig["threadId"]);
-            d.in_reply_to = h.get("message-id").cloned().unwrap_or_default();
-            d.references = h.get("references").cloned().unwrap_or_default();
-            if d.to.is_empty() {
-                let back = h.get("reply-to").or_else(|| h.get("from")).cloned().unwrap_or_default();
-                if !back.is_empty() {
-                    d.to = vec![back];
-                }
-            }
-            if d.subject.trim().is_empty() {
-                d.subject = mail::re(&h.get("subject").cloned().unwrap_or_default());
-            }
-        }
-        let raw = d.raw()?;
-        let mut message = json!({ "raw": raw });
-        if !thread.is_empty() {
-            message["threadId"] = json!(thread);
-        }
-        let made = api.send_json("POST", &api.gmail("users/me/drafts"), &[], &json!({"message": message}))?;
-        let draft = s(&made["id"]);
-        let reply_note = if thread.is_empty() { "" } else { ", in the thread it answers" };
-        Ok(MailDraftResult {
-            text: format!(
-                "Drafted \"{}\" to {} in {label}{reply_note}: draft {draft}. Nothing is sent: google.mail_send with \
-                 draft={draft} sends it.",
-                d.subject,
-                and(&d.to)
-            ),
-            account: label.clone(),
-            draft,
-            message: s(&made["message"]["id"]),
-            thread_id: s(&made["message"]["threadId"]),
-            to: d.to.clone(),
-            subject: d.subject.clone(),
-            ..Default::default()
-        })
-    })
-}
-
-fn mail_send(x: &Ext, _: &Job, p: MailSendParams) -> anyhow::Result<MailSendResult> {
-    let draft = p.draft.trim().to_string();
-    let direct = Draft {
-        to: p.to.clone(),
-        cc: p.cc.clone(),
-        subject: p.subject.clone(),
-        body: p.body.clone(),
-        ..Default::default()
-    };
-    if draft.is_empty() {
-        if p.to.is_empty() || p.subject.trim().is_empty() || p.body.trim().is_empty() {
-            bail!("google.mail_send needs a draft (google.mail_draft's), or to, subject and body");
-        }
-        direct.rfc5322()?;
-    } else if !p.to.is_empty() || !p.cc.is_empty() || !p.subject.is_empty() || !p.body.is_empty() {
-        bail!("give a draft, or to, subject and body, not both: a draft is sent as it is");
-    }
-    let label = x.write(&p.account, "google.mail_send")?;
-    x.api(&label, |api| {
-        let (sent, to, subject) = if draft.is_empty() {
-            let raw = direct.raw()?;
-            let sent = api.send_json("POST", &api.gmail("users/me/messages/send"), &[], &json!({ "raw": raw }))?;
-            (sent, p.to.clone(), p.subject.clone())
-        } else {
-            let d = api.get(&api.gmail(&format!("users/me/drafts/{}", segment(&draft))), &[("format", "metadata")])?;
-            let h = mail::headers(&d["message"]);
-            let to: Vec<String> = h.get("to").map(|t| vec![t.clone()]).unwrap_or_default();
-            let subject = h.get("subject").cloned().unwrap_or_default();
-            let sent = api.send_json("POST", &api.gmail("users/me/drafts/send"), &[], &json!({"id": draft}))?;
-            (sent, to, subject)
-        };
-        Ok(MailSendResult {
-            text: format!("Sent \"{subject}\" to {} from {label}.", and(&to)),
-            account: label.clone(),
-            message: s(&sent["id"]),
-            thread_id: s(&sent["threadId"]),
-            to,
-            subject,
-            ..Default::default()
-        })
-    })
 }
 
 fn calendars(x: &Ext, _: &Job, p: CalendarsParams) -> anyhow::Result<CalendarsResult> {
@@ -483,16 +253,16 @@ fn updates(notify: bool) -> &'static str {
     }
 }
 
-fn event_create(x: &Ext, _: &Job, p: EventCreateParams) -> anyhow::Result<EventCreateResult> {
+fn create(x: &Ext, _: &Job, p: CreateParams) -> anyhow::Result<CreateResult> {
     let zone = p.time_zone.trim();
     let (start, end) = calendar::times(&p.start, &p.end, zone)?;
-    mail::check_addresses("attendees", &p.attendees)?;
+    calendar::check_addresses("attendees", &p.attendees)?;
     let cal = calendar_id(&p.calendar);
-    let label = x.write(&p.account, "google.event_create")?;
+    let label = x.write(&p.account, "gcal.create")?;
     if !p.confirm {
         let invites = if p.attendees.is_empty() { String::new() } else { format!(", inviting {}", and(&p.attendees)) };
         bail!(
-            "not made: google.event_create needs confirm=true, given only once the person has said yes to \"{}\" from \
+            "not made: gcal.create needs confirm=true, given only once the person has said yes to \"{}\" from \
              {} to {} on {label}'s {cal} calendar{invites}",
             p.title,
             p.start,
@@ -523,7 +293,7 @@ fn event_create(x: &Ext, _: &Job, p: EventCreateParams) -> anyhow::Result<EventC
         let e = calendar::event(&label, &cal, &made);
         let meet = if e.meet.is_empty() { String::new() } else { format!(", Meet {}", e.meet) };
         let sent = if p.notify && !p.attendees.is_empty() { " Invitations sent." } else { "" };
-        Ok(EventCreateResult {
+        Ok(CreateResult {
             text: format!(
                 "Made \"{}\" on {label}'s {cal} calendar: {}{meet} ({}).{sent}",
                 e.title,
@@ -536,7 +306,7 @@ fn event_create(x: &Ext, _: &Job, p: EventCreateParams) -> anyhow::Result<EventC
     })
 }
 
-fn event_update(x: &Ext, _: &Job, p: EventUpdateParams) -> anyhow::Result<EventUpdateResult> {
+fn update(x: &Ext, _: &Job, p: UpdateParams) -> anyhow::Result<UpdateResult> {
     let zone = p.time_zone.trim();
     let mut body = json!({});
     let mut changed: Vec<String> = Vec::new();
@@ -564,7 +334,7 @@ fn event_update(x: &Ext, _: &Job, p: EventUpdateParams) -> anyhow::Result<EventU
         changed.push("location".into());
     }
     if !p.attendees.is_empty() {
-        mail::check_addresses("attendees", &p.attendees)?;
+        calendar::check_addresses("attendees", &p.attendees)?;
         body["attendees"] = json!(p.attendees.iter().map(|a| json!({"email": a})).collect::<Vec<_>>());
         changed.push("attendees".into());
     }
@@ -572,10 +342,10 @@ fn event_update(x: &Ext, _: &Job, p: EventUpdateParams) -> anyhow::Result<EventU
         bail!("nothing to change: give title, start and end, description, location or attendees");
     }
     let cal = calendar_id(&p.calendar);
-    let label = x.write(&p.account, "google.event_update")?;
+    let label = x.write(&p.account, "gcal.update")?;
     if !p.confirm {
         bail!(
-            "not changed: google.event_update needs confirm=true, given only once the person has said yes to changing \
+            "not changed: gcal.update needs confirm=true, given only once the person has said yes to changing \
              the {} of event {} on {label}'s {cal} calendar",
             and(&changed),
             p.id
@@ -585,7 +355,7 @@ fn event_update(x: &Ext, _: &Job, p: EventUpdateParams) -> anyhow::Result<EventU
         let url = api.calendar(&format!("calendars/{}/events/{}", segment(&cal), segment(&p.id)));
         let after = api.send_json("PATCH", &url, &[("sendUpdates", updates(p.notify))], &body)?;
         let e = calendar::event(&label, &cal, &after);
-        Ok(EventUpdateResult {
+        Ok(UpdateResult {
             text: format!("Changed the {} of \"{}\": {}.", and(&changed), e.title, calendar::line(&e)),
             event: e.into(),
             changed: changed.clone(),
@@ -594,12 +364,12 @@ fn event_update(x: &Ext, _: &Job, p: EventUpdateParams) -> anyhow::Result<EventU
     })
 }
 
-fn event_delete(x: &Ext, _: &Job, p: EventDeleteParams) -> anyhow::Result<EventDeleteResult> {
+fn delete(x: &Ext, _: &Job, p: DeleteParams) -> anyhow::Result<DeleteResult> {
     let cal = calendar_id(&p.calendar);
-    let label = x.write(&p.account, "google.event_delete")?;
+    let label = x.write(&p.account, "gcal.delete")?;
     if !p.confirm {
         bail!(
-            "not deleted: google.event_delete needs confirm=true, given only once the person has said yes to deleting \
+            "not deleted: gcal.delete needs confirm=true, given only once the person has said yes to deleting \
              event {} from {label}'s {cal} calendar",
             p.id
         );
@@ -608,7 +378,7 @@ fn event_delete(x: &Ext, _: &Job, p: EventDeleteParams) -> anyhow::Result<EventD
         let url = api.calendar(&format!("calendars/{}/events/{}", segment(&cal), segment(&p.id)));
         let e = calendar::event(&label, &cal, &api.get(&url, &[])?);
         api.delete(&url, &[("sendUpdates", updates(p.notify))])?;
-        Ok(EventDeleteResult {
+        Ok(DeleteResult {
             text: format!("Deleted \"{}\" ({}) from {label}'s {cal} calendar.", e.title, calendar::line(&e)),
             account: label.clone(),
             id: p.id.clone(),
@@ -688,31 +458,23 @@ fn main() -> anyhow::Result<()> {
     let xx = x.clone();
     ext.typed_command(move |job: &Job, p: AccountsParams| accounts_list(&xx, job, p));
     let xx = x.clone();
-    ext.typed_command(move |job: &Job, p: MailSearchParams| mail_search(&xx, job, p));
-    let xx = x.clone();
-    ext.typed_command(move |job: &Job, p: MailReadParams| mail_read(&xx, job, p));
-    let xx = x.clone();
-    ext.typed_command(move |job: &Job, p: MailDraftParams| mail_draft(&xx, job, p));
-    let xx = x.clone();
-    ext.typed_command(move |job: &Job, p: MailSendParams| mail_send(&xx, job, p));
-    let xx = x.clone();
     ext.typed_command(move |job: &Job, p: CalendarsParams| calendars(&xx, job, p));
     let xx = x.clone();
     ext.typed_command(move |job: &Job, p: EventsParams| events(&xx, job, p));
     let xx = x.clone();
-    ext.typed_command(move |job: &Job, p: EventCreateParams| event_create(&xx, job, p));
+    ext.typed_command(move |job: &Job, p: CreateParams| create(&xx, job, p));
     let xx = x.clone();
-    ext.typed_command(move |job: &Job, p: EventUpdateParams| event_update(&xx, job, p));
+    ext.typed_command(move |job: &Job, p: UpdateParams| update(&xx, job, p));
     let xx = x.clone();
-    ext.typed_command(move |job: &Job, p: EventDeleteParams| event_delete(&xx, job, p));
+    ext.typed_command(move |job: &Job, p: DeleteParams| delete(&xx, job, p));
     let xx = x.clone();
     ext.typed_command(move |job: &Job, p: FreebusyParams| freebusy(&xx, job, p));
 
-    // `/google add` and `/google client` posted (an agent, an older app): the apps open the forms for them
+    // `/gcal add` and `/gcal client` posted (an agent, an older app): the apps open the forms for them
     ext.typed_command(|_: &Job, _: AddParams| {
         Ok(AddResult {
             text: "A Google account is signed in from the Pointman app, so its token never goes in a post: type \
-                   `/google add <label>` there and tap Sign in."
+                   `/gcal add <label>` there and tap Sign in."
                 .into(),
             ..Default::default()
         })
@@ -720,7 +482,7 @@ fn main() -> anyhow::Result<()> {
     ext.typed_command(|_: &Job, _: ClientParams| {
         Ok(ClientResult {
             text: "The Google OAuth client is added in the Pointman app, so its secret never goes in a post: type \
-                   `/google client` there and paste its client ID and secret."
+                   `/gcal client` there and paste its client ID and secret."
                 .into(),
             ..Default::default()
         })
@@ -730,10 +492,10 @@ fn main() -> anyhow::Result<()> {
     let (xx, si) = (x.clone(), signins.clone());
     ext.on(move |p: CredentialsSignInRequest| {
         if p.form != "account" {
-            bail!("the Google extension signs in accounts only (form: account); the OAuth client is pasted with /google client");
+            bail!("gcal signs in accounts only (form: account); the OAuth client is pasted with /gcal client");
         }
         let label = p.label.trim();
-        if label == CLIENT_ITEM.trim_start_matches("google.") {
+        if label == CLIENT_ITEM.trim_start_matches("gcal.") {
             bail!("{CLIENT_ITEM} is the OAuth client's place in the vault: call the account something else");
         }
         let session = p.session.as_option().map(|s| s.id.as_str()).unwrap_or_default();

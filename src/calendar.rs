@@ -180,6 +180,19 @@ pub fn line(e: &Event) -> String {
     format!("{when}: {title}{place} [{}]", e.id)
 }
 
+/// Attendees' addresses checked: each has an @, and none has a line break.
+pub fn check_addresses(what: &str, list: &[String]) -> anyhow::Result<()> {
+    for a in list {
+        if a.contains(['\r', '\n']) {
+            bail!("{what}: {a:?} has a line break");
+        }
+        if !a.contains('@') {
+            bail!("{what}: {a:?} isn't an address (name@example.com)");
+        }
+    }
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

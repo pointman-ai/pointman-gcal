@@ -1,17 +1,17 @@
-//! Which Google accounts a call uses. Each is a label in the vault (`google.work` is `work`). A call may name one with
+//! Which Google accounts a call uses. Each is a label in the vault (`gcal.work` is `work`). A call may name one with
 //! `account`; else the `account` setting's is used. With neither, a read uses every account signed in, and a write
-//! uses the only one, or stops and lists them rather than send or change something as the wrong person.
+//! uses the only one, or stops and lists them rather than change something as the wrong person.
 
 use anyhow::bail;
 
 use crate::CLIENT_ITEM;
 
-/// The accounts' labels from the vault's `google.*` names: sorted, without the OAuth client's.
+/// The accounts' labels from the vault's `gcal.*` names: sorted, without the OAuth client's.
 pub fn labels(items: Vec<String>) -> Vec<String> {
     let mut out: Vec<String> = items
         .into_iter()
         .filter(|n| n != CLIENT_ITEM)
-        .filter_map(|n| n.strip_prefix("google.").map(String::from))
+        .filter_map(|n| n.strip_prefix("gcal.").map(String::from))
         .filter(|l| !l.is_empty())
         .collect();
     out.sort();
@@ -21,7 +21,7 @@ pub fn labels(items: Vec<String>) -> Vec<String> {
 
 /// The vault item of a label.
 pub fn item(label: &str) -> String {
-    format!("google.{label}")
+    format!("gcal.{label}")
 }
 
 fn listed(have: &[String]) -> String {
@@ -34,8 +34,8 @@ fn listed(have: &[String]) -> String {
 
 fn none_signed_in() -> anyhow::Error {
     anyhow::anyhow!(
-        "no Google account is signed in: add the OAuth client with /google client if it isn't there, then type \
-         /google add <label> in the app and tap Sign in"
+        "no Google account is signed in: add the OAuth client with /gcal client if it isn't there, then type \
+         /gcal add <label> in the app and tap Sign in"
     )
 }
 
@@ -54,7 +54,7 @@ pub fn named(have: &[String], asked: &str, setting: &str) -> anyhow::Result<Opti
     }
     bail!(
         "no Google account {want} is signed in ({from}); there's {}: pass account=<label> of one of them, or sign \
-         {want} in with /google add {want}",
+         {want} in with /gcal add {want}",
         listed(have)
     )
 }
@@ -93,13 +93,13 @@ mod tests {
     use super::*;
 
     fn have() -> Vec<String> {
-        labels(vec!["google.work".into(), "google.client".into(), "google.personal".into()])
+        labels(vec!["gcal.work".into(), "gcal.client".into(), "gcal.personal".into()])
     }
 
     #[test]
     fn the_client_isnt_an_account() {
         assert_eq!(have(), ["personal", "work"]);
-        assert_eq!(item("work"), "google.work");
+        assert_eq!(item("work"), "gcal.work");
     }
 
     #[test]
@@ -109,18 +109,18 @@ mod tests {
         assert_eq!(for_read(&have(), "", "personal").unwrap(), ["personal"]);
         assert_eq!(for_read(&have(), "work", "personal").unwrap(), ["work"], "the call's beats the setting's");
         let e = for_read(&have(), "school", "").unwrap_err().to_string();
-        assert!(e.contains("school") && e.contains("personal, work") && e.contains("/google add school"), "{e}");
+        assert!(e.contains("school") && e.contains("personal, work") && e.contains("/gcal add school"), "{e}");
         let e = for_read(&have(), "", "school").unwrap_err().to_string();
         assert!(e.contains("the account setting"), "{e}");
     }
 
     #[test]
     fn a_write_uses_the_one_named_or_the_only_one_or_stops() {
-        assert_eq!(for_write(&have(), "work", "", "google.mail_send").unwrap(), "work");
-        assert_eq!(for_write(&have(), "", "personal", "google.mail_send").unwrap(), "personal");
-        let e = for_write(&have(), "", "", "google.mail_send").unwrap_err().to_string();
+        assert_eq!(for_write(&have(), "work", "", "gcal.create").unwrap(), "work");
+        assert_eq!(for_write(&have(), "", "personal", "gcal.create").unwrap(), "personal");
+        let e = for_write(&have(), "", "", "gcal.create").unwrap_err().to_string();
         assert!(e.starts_with("nothing done: 2 Google accounts") && e.contains("personal, work"), "{e}");
-        assert_eq!(for_write(&["work".to_string()], "", "", "google.mail_send").unwrap(), "work");
+        assert_eq!(for_write(&["work".to_string()], "", "", "gcal.create").unwrap(), "work");
     }
 
     #[test]
@@ -130,7 +130,7 @@ mod tests {
             for_write(&[], "", "", "x").unwrap_err(),
             for_read(&[], "w", "").unwrap_err(),
         ] {
-            assert!(e.to_string().contains("/google add"), "{e}");
+            assert!(e.to_string().contains("/gcal add"), "{e}");
         }
     }
 }
