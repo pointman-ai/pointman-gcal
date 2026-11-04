@@ -44,6 +44,7 @@ post them only when asked.
 (`2026-11-05T10:00`, `Asia/Singapore`), or a day for an all-day event (`2026-11-05`; its `end` is the day after its last).
 A range's day starts at midnight UTC: give times with the person's offset for "today" or "this week".
 
-- **Not signed in?** Ask the person to run `/gcal client` in the app once (their Google Cloud OAuth client), then
-  `/gcal add <label>` for each account. Never ask for, paste or post a token, a code or the client's secret.
+- **Not signed in?** Ask the person to run `/gcal add <label>` in the app for each account. A self-hosted Pointman
+  needs its own Google Cloud OAuth client first (`/gcal client`, once); a hosted one uses Pointman's. Never ask for,
+  paste or post a token, a code or the client's secret.
 - An error that says a sign-in no longer works: ask them to run `/gcal add <label>` again for that account.

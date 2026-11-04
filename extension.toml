@@ -1,8 +1,10 @@
 # Google Calendar on Pointman: every agent on the machines it's installed on reads and changes calendars, with any number
 # of Google accounts. Each account is signed in from the apps (Google's authorization-code flow with PKCE, coming back
-# through core's /oauth/callback: nothing to paste), and its refresh token is kept in the vault as gcal.<label>, so
-# every node uses the same sign-ins. Reads go to every account unless a call names one. Making, changing or deleting
-# an event needs confirm=true, given once the person has said yes. Mail is gmail's, a separate extension.
+# by redirect: nothing to paste), and its refresh token is kept in the vault as gcal.<label>, so every node uses the
+# same sign-ins. On a hosted Pointman the sign-in goes through Pointman's own Google client, core's shared client, and
+# the code and refreshes go through core, so no client secret reaches the extension. A self-hosted Pointman uses a
+# client of its own (gcal.client). Reads go to every account unless a call names one. Making, changing or deleting an
+# event needs confirm=true, given once the person has said yes. Mail is gmail's, a separate extension.
 #
 # The commands' params and [settings] are written from proto/gcal/v1/gcal.proto (`<Verb>Params`, `Settings`) by
 # the SDK's `pointman-extension manifest write`: change the proto, then write them again.
@@ -10,10 +12,10 @@
 [extension]
 id = "gcal"
 name = "Google Calendar"
-version = "0.1.0"
+version = "0.2.0"
 publisher = "aurelio"
 summary = "Google Calendar for every agent: list calendars and events, find busy times, and make, change and delete events, with any number of Google accounts."
-node = ">=0.4.0"
+node = ">=0.4.12"
 platforms = ["macos-arm64", "macos-x86_64", "linux-x86_64", "linux-arm64"]
 
 [run]
@@ -26,28 +28,32 @@ clients = ["claude", "codex", "gemini"]
 
 [permissions]
 network = true                   # Calendar's API, and Google's OAuth endpoints
-secrets = ["gcal.*"]             # gcal.client (the OAuth client) and gcal.<label> (each account's sign-in)
+secrets = ["gcal.*"]             # gcal.client (a self-hosted Pointman's OAuth client) and gcal.<label> (each account)
 
-# Your own Google OAuth client, once: a "Web application" client in a Google Cloud project with the Google Calendar API
-# turned on, whose authorised redirect URI is your Pointman's /oauth/callback. gmail can use the same client.
+# Only for a self-hosted Pointman: a Google OAuth client of its own, a "Web application" client in a Google Cloud project
+# with the Google Calendar API turned on, whose authorised redirect URI is that Pointman's /oauth/callback. A hosted
+# Pointman signs in with its shared client, whose redirect is https://api.pointman.ai/v1/oauth/google/callback, and needs
+# none. gmail can use the same client.
 [[credentials]]
 id = "client"
 title = "Your Google OAuth client"
-help = "In Google Cloud console: APIs & Services › Credentials › Create OAuth client ID › Web application, with redirect URI https://<your Pointman>/oauth/callback. Turn on the Calendar API. Paste its client ID, a space, then its secret."
-needed = 1
+help = "Only for a self-hosted Pointman: a hosted one signs in with Pointman's own client. In Google Cloud console: Credentials › Create OAuth client ID › Web application, with redirect URI https://<your Pointman>/oauth/callback. Turn on the Calendar API. Paste its client ID, a space, then its secret."
+needed = 0
 item = "gcal.client"
 value = '[0-9]+-[a-z0-9]+\.apps\.googleusercontent\.com[\s:]+[A-Za-z0-9_-]{16,128}'
 placeholder = "123-abc.apps.googleusercontent.com GOCSPX-…"
 
-# A Google account: Sign in from the apps, kept as its refresh token. Any number, each with its own label.
+# A Google account: Sign in from the apps, kept as its refresh token (`shared:` before it when Pointman's shared client
+# signed it in, so its refreshes go through core). Any number, each with its own label.
 [[credentials]]
 id = "account"
 title = "Google account"
 help = "Sign in with the Google account and allow Calendar. Give each account its own label (work, personal)."
 item = "gcal.{label}"
-value = '1//[A-Za-z0-9_-]{20,512}'
+value = '(shared:)?1//[A-Za-z0-9_-]{20,512}'
 placeholder = "1//0g…"
 sign_in = true
+shared_client = "google"
 
 # From Settings in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [settings]
@@ -381,7 +387,7 @@ kind = "gcal.client"
 title = "Add your Google OAuth client"
 slash = "client"
 form = "client"
-summary = "The Google OAuth client the sign-ins go through: a Web application client in your Cloud project"
+summary = "A self-hosted Pointman's own Google OAuth client: a Web application client in your Cloud project"
 
 # From ClientParams in proto/gcal/v1/gcal.proto: `pointman-extension manifest write`
 [commands.params]
